@@ -1,5 +1,6 @@
 using AgenticRagScannerApi.Configuration;
 using AgenticRagScannerApi.Services;
+using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,6 +33,10 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+
+    // Interactive API reference UI (renders the OpenAPI doc at /openapi/v1.json).
+    // Browse it at /scalar/v1.
+    app.MapScalarApiReference();
 }
 
 app.UseHttpsRedirection();
