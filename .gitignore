@@ -55,3 +55,7 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Local secrets / overrides — never commit real values
+appsettings.Local.json
+appsettings.*.Local.json
