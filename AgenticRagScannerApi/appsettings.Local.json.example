@@ -1,0 +1,30 @@
+{
+  "//": "Copy this file to 'appsettings.Local.json' and fill in real values for local dev.",
+  "//secrets": "appsettings.Local.json is git-ignored. NEVER commit real endpoints, keys, or connection strings (public repo — see architecture-context.md §1).",
+  "//auth": "Prefer DefaultAzureCredential where possible; the ApiKey/ConnectionString fields exist for local development only.",
+  "AzureStorage": {
+    "BlobServiceUri": "https://<your-account>.blob.core.windows.net",
+    "ConnectionString": "",
+    "DocumentsContainer": "documents",
+    "ExportsContainer": "exports"
+  },
+  "AzureSearch": {
+    "Endpoint": "https://<your-service>.search.windows.net",
+    "IndexName": "<your-index-name>",
+    "ApiKey": ""
+  },
+  "Foundry": {
+    "Endpoint": "https://<your-foundry-endpoint>",
+    "ModelDeploymentName": "<your-model-deployment-name>",
+    "ApiKey": ""
+  },
+  "BingSearchGrounding": {
+    "ConnectionId": "<your-bing-search-grounding-connection-id>",
+    "ApiKey": ""
+  },
+  "BingCustomSearchGrounding": {
+    "ConnectionId": "<your-bing-custom-search-grounding-connection-id>",
+    "CustomConfigurationId": "<your-custom-configuration-id>",
+    "ApiKey": ""
+  }
+}

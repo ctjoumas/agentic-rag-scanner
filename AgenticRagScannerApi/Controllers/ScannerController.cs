@@ -1,3 +1,4 @@
+using AgenticRagScannerApi.Models;
 using AgenticRagScannerApi.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -34,11 +35,35 @@ public class ScannerController : ControllerBase
         _logger = logger;
     }
 
-    /// <summary>Placeholder scan endpoint. Implementation to follow.</summary>
+    /// <summary>
+    /// Manually triggers a horizon scan for the supplied date + jurisdiction +
+    /// topic groups. For this sprint the request is validated and acknowledged
+    /// with a run id; the per-topic-group MAF workflow orchestration is implemented later.
+    /// </summary>
     [HttpPost("scan")]
-    public IActionResult Scan()
+    [ProducesResponseType(typeof(ScanResponse), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public IActionResult Scan([FromBody] ScanRequest request)
     {
-        // TODO: orchestrate the per-topic-group MAF workflows.
-        return StatusCode(StatusCodes.Status501NotImplemented, "Not implemented yet.");
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var runId = Guid.NewGuid().ToString("N");
+
+        _logger.LogInformation(
+            "Accepted scan run {RunId}: jurisdiction={Jurisdiction}, asOfDate={AsOfDate}, topicGroups={TopicGroupCount}",
+            runId, request.Jurisdiction, request.AsOfDate, request.TopicGroups.Count);
+
+        // TODO: fan out one MAF workflow per topic group under a shared throttle
+        // (architecture-context.md §3). Deferred per §5.
+        var response = new ScanResponse
+        {
+            RunId = runId,
+            TopicGroups = request.TopicGroups,
+        };
+
+        return AcceptedAtAction(nameof(Scan), new { runId }, response);
     }
 }

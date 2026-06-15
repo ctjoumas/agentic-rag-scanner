@@ -60,3 +60,11 @@ nunit-*.xml
 appsettings.Local.json
 appsettings.*.Local.json
 *.user
+
+# Visual Studio IDE files (the streamlined Dotnet template omits these).
+# .vs/ also covers Copilot chat sessions, CopilotIndices, FileContentIndex,
+# DocumentLayout.json, VSWorkspaceState.json, and *.suo/*.wsuo.
+.vs/
+*.suo
+*.userosscache
+*.sln.docstates

@@ -1,21 +1,8 @@
 # Agentic RAG Scanner — Architecture & Context Primer
 
-> **Purpose of this file.** This is the handoff/context primer for the `agentic-rag-scanner`
-> project. It captures every decision made so far so that a fresh GitHub Copilot Chat session
-> (in Visual Studio, VS Code, or anywhere) can rehydrate the full context by reading this file.
-> It also doubles as the public "patterns and practices" reference shared with the customer.
->
-> **How to use in a new Copilot Chat session:** open this file and reference it, e.g.
-> `#file:architecture-context.md`, then continue the conversation.
-
 ---
 
 ## 1. What this project is
-
-A **public, MIT-licensed reference implementation** of an agentic Retrieval-Augmented
-Generation (RAG) pipeline for **regulatory horizon-scanning**. It mirrors a customer's product
-setup — same Azure services, same sample data shape — so patterns and practices can be shared
-openly **without** using the customer's product name, brand, or any identifying material.
 
 - **Repo:** [ctjoumas/agentic-rag-scanner](https://github.com/ctjoumas/agentic-rag-scanner)
 - **License:** MIT
@@ -25,14 +12,6 @@ openly **without** using the customer's product name, brand, or any identifying 
 > **Target framework decision:** **.NET 10 (LTS, released Nov 2025, supported to ~Nov 2028)**.
 > Chosen over .NET 9 because .NET 9 is STS and reached end of support around May 2026 — not
 > appropriate for a new, customer-facing reference repo. The SDK on the dev machine is .NET 10.
-
-### Naming rationale
-- Chosen name **`agentic-rag-scanner`** deliberately avoids the customer's product name (public
-  repo / confidentiality) and avoids vendor lock-in in the slug (no "bing").
-- "agentic-rag" = the core pattern; "scanner" = the horizon-scanning domain.
-- Keyword discoverability lives in GitHub **topics**, not the slug:
-  `agentic-rag`, `microsoft-agent-framework`, `azure-openai`, `bing-search`, `cosmos-db`,
-  `dotnet`, `reference-architecture`.
 
 ### Public-repo hygiene (important)
 Because this is public, MIT-licensed, and mirrors the customer's setup with *their sample data*:
@@ -47,7 +26,7 @@ Because this is public, MIT-licensed, and mirrors the customer's setup with *the
 
 ## 2. Domain & inputs
 
-Regulatory horizon-scanning for auditors.
+Regulatory scanning for auditors.
 
 - **Input:** a **date** + **jurisdiction** (e.g., United Kingdom) + selected **topic groups**.
 - **Topic groups** are dense **OR-lists of keyword/synonym phrases** (acronyms/aliases). Example
@@ -165,28 +144,3 @@ a Web API only** and **manually trigger** scans. The Function can be added later
 
 **Explicitly deferred (do NOT build yet):** Azure Function host, Cosmos persistence logic, the MAF
 workflow/agent implementations, the memory/learnings store, the FUTURE review/distillation loop, infra (Bicep).
-
----
-
-## 6. Environment & conventions
-
-- **OS:** Windows. **Shell:** PowerShell 5.1. **IDE:** moving from VS Code → Visual Studio for .NET work.
-- **Both IDEs** read the same `dotnet new` solution/projects natively; the scaffold is IDE-agnostic.
-- **Sprint length:** ~2 weeks. **Current date context:** mid-June 2026.
-
----
-
-## 7. Companion artifacts
-
-From the original design session (in `C:\Code With\Deloitte\HorizonScanner`, to be moved into
-`docs/` here, minus anything customer-identifying):
-- `horizon-scanner-architecture.md` — full design doc with per-step explanations.
-- `horizon-scanner-architecture.mmd` / `.svg` / `.pdf` / `.html` — the workflow diagram exports.
-
----
-
-## 8. Next steps (after this primer is committed)
-
-1. Commit this file (and optionally move the design doc + diagram exports into `docs/`).
-2. In Visual Studio, open the repo, reference this file in Copilot Chat to rehydrate context.
-3. Proceed with **project scaffolding** per section 5 (Web API + DI + 5 service classes behind interfaces).
