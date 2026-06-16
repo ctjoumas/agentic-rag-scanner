@@ -174,37 +174,37 @@ compile and are referenced by the API.
 
 ---
 
-### Phase 1 — Run lifecycle & topic-group fan-out · *L1-led*
-**Goal:** accept the request, **fan out by topic group**, and run a placeholder per-group task.
+### Phase 1 — Run lifecycle & sequential topic-group execution · *L1-led*
+**Goal:** accept the request, iterate the selected topic groups **sequentially** (one at a time), and run a placeholder per-group task. *(Parallel fan-out is deferred to Phase 13.)*
 `? arch steps 1–2`
 
 **Tasks**
 - [ ] **(L1)** `IScanOrchestrator` + implementation: map `ScanRequest` ? one `TopicGroupContext`
-  per group (each seeded with an empty `SearchHistory`).
-- [ ] **(L1)** Per-group **placeholder** pipeline (returns a stub result) so fan-out is observable.
+  per group (each seeded with an empty `SearchHistory`), then run them **one at a time**.
+- [ ] **(L1)** Per-group **placeholder** pipeline (returns a stub result) so **sequential per-group** progress is observable.
 - [ ] **(L1)** Run **status store** (in-memory): `runId` ? status + per-group progress.
 - [ ] **(L1)** `GET /api/v1/scanner/runs/{runId}` status endpoint.
 - [ ] **(L1)** Wire `ScannerController.Scan` to start the run and return `202` + `runId` (replace TODO).
-- [ ] **(L3)** Structured logging scopes (`runId`, `topicGroupId`) around fan-out.
+- [ ] **(L3)** Structured logging scopes (`runId`, `topicGroupId`) around the sequential per-group loop.
 
 **DoD / demo:** `POST scan` with 3 topic groups ? `202` + `runId`; `GET runs/{runId}` shows 3 groups
-moving to "completed (stub)". No MAF yet.
+moving one-by-one to "completed (stub)". No MAF yet.
 
 ---
 
-### Phase 2 — Parallel execution harness + shared throttle · *L1-led*
-**Goal:** run the N group pipelines **truly in parallel** under the shared throttle; make scans
+### Phase 2 — Background execution harness + cancellation (sequential) · *L1-led*
+**Goal:** run the group pipelines **sequentially** (one group at a time; parallel execution deferred to Phase 13) and make scans
 long-running/background. `? arch steps 2–3 (concurrency, arch §4)`
 
 **Tasks**
-- [ ] **(L1)** Execute groups with `Task.WhenAll` gated by the shared throttle (cap concurrency).
+- [ ] **(L1)** Execute groups in a **sequential loop** (`foreach`) over the run's topic groups; wire the shared throttle for outbound rate-limiting (concurrency capping deferred to Phase 13).
 - [ ] **(L1)** Background execution (e.g. hosted background queue/`Channel`) so the HTTP call
   returns immediately and the run continues; status endpoint reflects progress.
 - [ ] **(L1)** Cancellation: cancel a run via token; partial results preserved.
-- [ ] **(L3)** Traces/metrics: span per run, per group; metric for in-flight concurrency.
+- [ ] **(L3)** Traces/metrics: span per run, per group; per-group status/progress metrics (in-flight concurrency metric deferred to Phase 13).
 
-**DoD / demo:** 5 groups run concurrently but throttle limits active workers; status shows live
-progress; a run can be cancelled; traces show parallel spans.
+**DoD / demo:** 3 groups run **sequentially** in the background; status shows live
+progress; a run can be cancelled; per-run/per-group spans visible.
 
 > **Sync point:** end of Phase 2 the **skeleton is ready**. L2 and L3 can now build agents/data
 > against the contracts largely independently.
@@ -409,7 +409,24 @@ authority level stamped.
 
 ---
 
-### Phase 13 — FUTURE / post-POC (not scheduled) · *backlog*
+### Phase 13 — Fan-out & parallelization (MAF) · *L1-led*
+**Goal:** now that the whole pipeline runs reliably **end-to-end and sequentially**, introduce
+parallel per-topic-group execution under the shared throttle. Deferred here on purpose to de-risk
+threading and keep the early phases focused on the core RAG loop.
+
+**Tasks**
+- [ ] **(L1)** Replace the sequential run loop (Phase 2) with `Task.WhenAll` gated by the shared
+  throttle; **cap active workers**; preserve per-group isolation (one group failing does not abort the run).
+- [ ] **(L1)** Per-group cancellation still honored under parallel execution; partial results preserved.
+- [ ] **(L3)** Concurrency telemetry: in-flight concurrency gauge + throttle wait-time metric; parallel spans per run/group.
+- [ ] **(L1)** Load/throttle tuning under parallel load: stay within TPM/RPM/QPS with N groups in flight; backpressure verified; per-group cap documented.
+
+**DoD / demo:** the same pipeline that ran sequentially now runs topic groups **concurrently** under
+the throttle; throughput improves; the throttle caps active workers; parallel spans visible; cancellation still works.
+
+---
+
+### Phase 14 — FUTURE / post-POC (not scheduled) · *backlog*
 `? arch steps 18–20 + primer §5 deferrals`
 - [ ] Azure **Function** timer host (scheduled scans) alongside the Web API.
 - [ ] **Bicep** infra-as-code for all resources + Managed Identity role assignments.
@@ -435,7 +452,7 @@ Phase 0 (contracts) ????> Phase 1 ?> Phase 2 ???> Phase 3 (skeleton) ??> from he
 - **After Phase 3**, the three lanes proceed largely in parallel:
   - **L2** drives the agent chain (4 ? 5 ? 6 fetch ? 7 ? 8).
   - **L3** drives storage (6) + persistence/export/memory (9 ? 10 ? 11) — can start storage early.
-  - **L1** owns loop controller/verdict routing (7) and concurrency/throttle tuning (2, 12).
+  - **L1** owns loop controller/verdict routing (7), the sequential run harness (2), and **fan-out/parallelization (13)** plus throttle tuning (12).
 - **Integration sync points:** end of Phase 0 (contracts), end of Phase 3 (loop shape), and before
   Phase 9 (ResultItem schema final).
 
@@ -466,5 +483,5 @@ Split Phase 0 across the team immediately:
 - **L1:** throttle abstraction + run/group context shapes.
 - **L2:** `SearchHistory` + `ResultItem` + verdict/date enums (the agent-facing contracts).
 
-Once Phase 0 merges, branch **Phase 1** (`feat/phase-1-topic-group-fanout`, L1-led) while L2/L3
+Once Phase 0 merges, branch **Phase 1** (`feat/phase-1-sequential-execution`, L1-led) while L2/L3
 begin prepping their tracks against the frozen contracts.

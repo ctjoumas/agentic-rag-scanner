@@ -15,7 +15,7 @@
 
 ## Suggested labels & milestones
 
-**Milestones (one per phase):** `phase-0` … `phase-13`.
+**Milestones (one per phase):** `phase-0` … `phase-14`.
 
 **Type labels:** `epic`, `user-story`, `task`, `spike`, `chore`, `bug`.
 **Lane labels:** `lane:L1-orchestration`, `lane:L2-agents`, `lane:L3-data-platform`.
@@ -73,17 +73,17 @@ text remains (primer §1).
 
 ---
 
-## Epic 1 — Run lifecycle & topic-group fan-out · `phase-1` · *L1-led*
+## Epic 1 — Run lifecycle & sequential topic-group execution · `phase-1` · *L1-led*
 
-### 1.1 — Scan orchestrator: fan-out + controller trigger · `lane:L1-orchestration`
-**As an** auditor, **I want** a scan to start from the API, **so that** the request fans out into per-group work.
+### 1.1 — Scan orchestrator: sequential per-group execution + controller trigger · `lane:L1-orchestration`
+**As an** auditor, **I want** a scan to start from the API, **so that** each selected topic group's work runs in turn.
 **AC:**
-- `IScanOrchestrator` maps `ScanRequest` -> one `TopicGroupContext` per group, each seeded with an empty `SearchHistory`.
+- `IScanOrchestrator` maps `ScanRequest` -> one `TopicGroupContext` per group (each seeded with an empty `SearchHistory`), then **executes them sequentially, one group at a time** (parallel fan-out is deferred to Epic 13).
 - `ScannerController.Scan` calls the orchestrator (replaces the current TODO), returns `202` + `runId`, and logs the accepted run.
 `labels: user-story, area:maf` · **depends on:** 0.3, 0.4 · *(merged: former 1.1 + 1.5)*
 
 ### 1.2 — Per-group placeholder pipeline · `lane:L1-orchestration`
-**AC:** each group runs a stub step returning a placeholder result; fan-out observable in logs.
+**AC:** each group runs a stub step returning a placeholder result; sequential per-group progress observable in logs.
 `labels: user-story` · **depends on:** 1.1.
 
 ### 1.3 — Run status store + `GET /runs/{runId}` endpoint · `lane:L1-orchestration`
@@ -92,15 +92,15 @@ text remains (primer §1).
 - `GET /runs/{runId}` returns run status + per-group progress; `404` for an unknown run.
 `labels: user-story` · **depends on:** 1.1 · *(merged: former 1.3 + 1.4)*
 
-**Epic demo:** `POST scan` (3 groups) -> `202` + `runId`; `GET runs/{runId}` shows 3 groups completing (stub).
+**Epic demo:** `POST scan` (3 groups) -> `202` + `runId`; `GET runs/{runId}` shows the 3 groups completing **one after another** (stub).
 
 ---
 
-## Epic 2 — Parallel execution harness + shared throttle · `phase-2` · *L1-led*
+## Epic 2 — Background execution harness + cancellation (sequential) · `phase-2` · *L1-led*
 
-### 2.1 — Run groups in parallel under the shared throttle · `lane:L1-orchestration`
-**AC:** `Task.WhenAll` gated by throttle; active workers capped; verified by test.
-`labels: user-story, area:maf` · **depends on:** 1.2, 0.4.
+### 2.1 — Sequential run loop over topic groups · `lane:L1-orchestration`
+**AC:** ordered `foreach` over the run's `TopicGroupContext`s (one group completes before the next starts); shared throttle wired for outbound LLM/Bing **rate-limiting** (concurrency capping deferred to Epic 13); verified by test.
+`labels: user-story, area:maf` · **depends on:** 1.2, 0.4 · *(was: parallel execution — parallelization moved to Epic 13)*
 
 ### 2.2 — Background execution + cancellation · `lane:L1-orchestration`
 **AC:**
@@ -108,11 +108,11 @@ text remains (primer §1).
 - A run can be cancelled via token; partial results preserved; status shows "cancelled".
 `labels: user-story` · **depends on:** 2.1 · *(merged: former 2.2 + 2.3)*
 
-### 2.3 — Concurrency traces & metrics · `lane:L3-data-platform`
-**AC:** span per run + per group; in-flight concurrency metric emitted.
+### 2.3 — Run & group traces + status metrics · `lane:L3-data-platform`
+**AC:** span per run + per group; per-group status/progress metrics emitted (in-flight concurrency metric deferred to Epic 13).
 `labels: user-story, area:observability` · **depends on:** 2.1.
 
-**Epic demo:** 5 groups run concurrently but throttle limits workers; live progress; cancellable; parallel spans visible.
+**Epic demo:** a scan runs in the background across 3 groups **sequentially**; live per-group progress; the run is cancellable; per-run/per-group spans visible.
 
 ---
 
@@ -324,14 +324,35 @@ Query Synthesis + Relevance Eval; distinct from per-run `SearchHistory`.
 
 ---
 
-## Epic 13 — FUTURE / post-POC (backlog) · `phase-13` · `future`
+## Epic 13 — Fan-out & parallelization (MAF) · `phase-13` · *L1-led*
+> Deferred on purpose: get the whole pipeline running **correctly and sequentially** first, then add
+> concurrency. Replace the sequential run loop (2.1) with parallel per-topic-group execution under the
+> shared throttle once Epics 1–12 are green.
+
+### 13.1 — Run topic-group workflows in parallel under the shared throttle · `lane:L1-orchestration`
+**AC:** replace the sequential loop (2.1) with `Task.WhenAll` gated by the shared throttle; active workers capped; per-group isolation preserved (one group failing does not abort the run); verified by test.
+`labels: user-story, area:maf` · **depends on:** 2.2, 0.4 · after Epics 3–10 are green · *(parallel scope split out of former 2.1)*
+
+### 13.2 — In-flight concurrency traces & metrics · `lane:L3-data-platform`
+**AC:** in-flight concurrency gauge + throttle wait-time metric emitted; parallel spans visible per run/group.
+`labels: user-story, area:observability` · **depends on:** 13.1 · *(was former 2.3's concurrency metric)*
+
+### 13.3 — Load/throttle tuning under parallel load · `lane:L1-orchestration`
+**AC:** stays within TPM/RPM/QPS with N groups in flight; backpressure verified; per-group cap tuned and documented.
+`labels: user-story, area:maf` · **depends on:** 13.1, 12.2.
+
+**Epic demo:** the same pipeline that ran sequentially now runs topic groups **concurrently** under the throttle; throughput improves; the throttle caps active workers; parallel spans visible; cancellation still works.
+
+---
+
+## Epic 14 — FUTURE / post-POC (backlog) · `phase-14` · `future`
 > Not scheduled for the POC; captured so they aren't lost (primer §5 deferrals).
 
-- **13.1** Azure Function timer host (scheduled scans) · `lane:L1-orchestration` · `future`
-- **13.2** Bicep IaC for all resources + Managed Identity role assignments · `lane:L3-data-platform` · `future`
-- **13.3** Admin UI — review of past runs · `future`
-- **13.4** Structured review capture (verdict correction + reason-code tags + freeform note) · `future`
-- **13.5** Distillation job -> curated guidance rules into memory store · `future`
+- **14.1** Azure Function timer host (scheduled scans) · `lane:L1-orchestration` · `future`
+- **14.2** Bicep IaC for all resources + Managed Identity role assignments · `lane:L3-data-platform` · `future`
+- **14.3** Admin UI — review of past runs · `future`
+- **14.4** Structured review capture (verdict correction + reason-code tags + freeform note) · `future`
+- **14.5** Distillation job -> curated guidance rules into memory store · `future`
 
 ---
 
@@ -342,6 +363,7 @@ Query Synthesis + Relevance Eval; distinct from per-run `SearchHistory`.
 3. **In parallel L2** takes **Epic 3 agent stubs (3.6–3.10)** -> **Epic 4**.
 4. **In parallel L3** takes **0.5/0.6**, then **Epic 6 storage (6.1)** and **Epic 9** prep.
 5. **Sync points:** end of Epic 0 (contracts) and end of Epic 3 (agent I/O frozen).
+6. **Keep execution sequential:** run topic groups **one at a time** through Epics 1–12; pull **Epic 13 (fan-out & parallelization)** only once the sequential pipeline is green end-to-end.
 
 ---
 
