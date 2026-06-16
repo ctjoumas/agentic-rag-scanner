@@ -1,4 +1,5 @@
 using AgenticRagScannerApi.Configuration;
+using AgenticRagScannerApi.Filters;
 using AgenticRagScannerApi.Services;
 using Scalar.AspNetCore;
 
@@ -23,7 +24,7 @@ builder.Services.AddSingleton<IBingSearchGroundingService, BingSearchGroundingSe
 builder.Services.AddSingleton<IBingCustomSearchGroundingService, BingCustomSearchGroundingService>();
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers(options => options.Filters.Add<ApiExceptionFilterAttribute>());
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 

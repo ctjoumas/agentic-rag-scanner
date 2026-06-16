@@ -27,6 +27,19 @@
       }
     },
     {
+      "label": "rebuild",
+      "type": "process",
+      "command": "dotnet",
+      "dependsOn": "restore",
+      "args": [
+        "build",
+        "${workspaceFolder}/AgenticRagScannerApi.sln",
+        "--no-incremental",
+        "--force"
+      ],
+      "problemMatcher": "$msCompile"
+    },
+    {
       "label": "run-api",
       "type": "process",
       "command": "dotnet",
@@ -43,7 +56,7 @@
       }
     },
     {
-      "label": "watch-api",
+      "label": "watch-api", 
       "type": "process",
       "command": "dotnet",
       "dependsOn": "restore",
