@@ -72,6 +72,38 @@
       "options": {
         "cwd": "${workspaceFolder}/AgenticRagScannerApi"
       }
+    },
+    {
+      "label": "run-tests",
+      "type": "process",
+      "command": "dotnet",
+      "dependsOn": "build",
+      "args": [
+        "test",
+        "${workspaceFolder}/AgenticRagScannerApi.sln",
+        "--no-build"
+      ],
+      "problemMatcher": "$msCompile",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "run-tests-with-coverage",
+      "type": "process",
+      "command": "dotnet",
+      "dependsOn": "build",
+      "args": [
+        "test",
+        "${workspaceFolder}/AgenticRagScannerApi.sln",
+        "--no-build",
+        "--collect:XPlat Code Coverage",
+        "--results-directory",
+        "${workspaceFolder}/TestResults/Coverage"
+      ],
+      "problemMatcher": "$msCompile",
+      "group": "test"
     }
   ]
 }
