@@ -4,7 +4,7 @@ using AgenticRagScannerApi.Mappers;
 using AgenticRagScannerApi.Services;
 using AgenticRagScannerApi.Validators;
 using FluentValidation;
-using FluentValidation.AspNetCore;
+using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
 
 namespace AgenticRagScannerApi.Extensions;
 
@@ -52,7 +52,7 @@ public static class ServiceCollectionExtensions
         // Validation layer — register FluentValidation and discover validators.
         services.AddFluentValidationAutoValidation(options =>
         {
-            options.DisableDataAnnotationsValidation = true;
+            options.DisableBuiltInModelValidation = true;
         });
         services.AddValidatorsFromAssemblyContaining<ScanRequestValidator>();
 
