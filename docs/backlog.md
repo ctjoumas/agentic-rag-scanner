@@ -135,27 +135,27 @@ LoopController -> VerdictRouting -> Enrichment -> Categorize -> Summarize&Impact
 - Verdict Routing stub: RELEVANT/BORDERLINE -> enrichment; NOT_RELEVANT -> dropped + logged for audit.
 `labels: user-story` · **depends on:** 3.2 · *(merged: former 3.3 + 3.4)*
 
-### 3.5 — Register Bing Search as an allowlist-gated tool (stub) · `lane:L2-agents`
+### 3.4 — Register Bing Search as an allowlist-gated tool (stub) · `lane:L2-agents`
 **AC:** Bing registered as a **tool/connector** (not an LLM agent), returns canned hits; allowlist hook present.
 `labels: user-story, area:bing` · **depends on:** 3.2.
 
-### 3.6 — Stub: Query Synthesis Agent · `lane:L2-agents`
+### 3.5 — Stub: Query Synthesis Agent · `lane:L2-agents`
 **AC:** MAF agent definition + DI + `Prompts/QuerySynthesisPrompt.cs` placeholder; returns 1–2 canned queries.
 `labels: user-story, area:llm` · **depends on:** 0.3, 3.2.
 
-### 3.7 — Stub: Relevance Eval Agent · `lane:L2-agents`
+### 3.6 — Stub: Relevance Eval Agent · `lane:L2-agents`
 **AC:** returns canned `Verdict` + date fields; agent def + DI + prompt placeholder.
 `labels: user-story, area:llm` · **depends on:** 0.3, 3.2.
 
-### 3.8 — Stub: Enrichment Agent · `lane:L2-agents`
+### 3.7 — Stub: Enrichment Agent · `lane:L2-agents`
 **AC:** returns canned `whatItDoes` + metadata; agent def + DI + prompt placeholder.
 `labels: user-story, area:llm` · **depends on:** 0.3, 3.2.
 
-### 3.9 — Stub: Categorize Agent · `lane:L2-agents`
+### 3.8 — Stub: Categorize Agent · `lane:L2-agents`
 **AC:** returns canned impact area / regulator / approved tags; agent def + DI + prompt placeholder.
 `labels: user-story, area:llm` · **depends on:** 0.3, 3.2.
 
-### 3.10 — Stub: Summarize & Impact Agent · `lane:L2-agents`
+### 3.9 — Stub: Summarize & Impact Agent · `lane:L2-agents`
 **AC:** returns canned plain-English summary; agent def + DI + prompt placeholder.
 `labels: user-story, area:llm` · **depends on:** 0.3, 3.2.
 
