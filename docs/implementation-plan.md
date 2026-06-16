@@ -129,10 +129,10 @@ Keep it light; do it once in Phase 0.
 
 ```
 AgenticRagScanner.sln
-?? AgenticRagScannerApi/            # host: controllers, DI, Program.cs (exists)
-?? AgenticRagScanner.Core/          # NEW: domain models, enums, interfaces, SearchHistory, ResultItem
-?? AgenticRagScanner.Workflows/     # NEW: MAF workflow + agents (L1/L2)  [added in Phase 3]
-?? AgenticRagScanner.Tests/         # NEW: unit/contract/integration/eval tests
+ AgenticRagScannerApi/            # host: controllers, DI, Program.cs (exists)
+ AgenticRagScanner.Core/          # NEW: domain models, enums, interfaces, SearchHistory, ResultItem
+ AgenticRagScanner.Workflows/     # NEW: MAF workflow + agents (L1/L2)  [added in Phase 3]
+ AgenticRagScanner.Tests/         # NEW: unit/contract/integration/eval tests
 ```
 
 > The existing `Services/` and `Configuration/` may stay in the API host for now, or move to Core
