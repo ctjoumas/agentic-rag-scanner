@@ -108,7 +108,7 @@ text remains (primer §1).
 - A run can be cancelled via token; partial results preserved; status shows "cancelled".
 `labels: user-story` · **depends on:** 2.1 · *(merged: former 2.2 + 2.3)*
 
-### 2.4 — Concurrency traces & metrics · `lane:L3-data-platform`
+### 2.3 — Concurrency traces & metrics · `lane:L3-data-platform`
 **AC:** span per run + per group; in-flight concurrency metric emitted.
 `labels: user-story, area:observability` · **depends on:** 2.1.
 
