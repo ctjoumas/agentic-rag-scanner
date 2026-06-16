@@ -1,7 +1,10 @@
 {
   "//": "Copy this file to 'appsettings.Local.json' and fill in real values for local dev.",
-  "//secrets": "appsettings.Local.json is git-ignored. NEVER commit real endpoints, keys, or connection strings (public repo — see architecture-context.md §1).",
+  "//secrets": "appsettings.Local.json is git-ignored. NEVER commit real endpoints, keys, or connection strings (public repo ï¿½ see architecture-context.md ï¿½1).",
   "//auth": "Prefer DefaultAzureCredential where possible; the ApiKey/ConnectionString fields exist for local development only.",
+  "ApplicationInsights": {
+    "ConnectionString": ""
+  },
   "AzureStorage": {
     "BlobServiceUri": "https://<your-account>.blob.core.windows.net",
     "ConnectionString": "",

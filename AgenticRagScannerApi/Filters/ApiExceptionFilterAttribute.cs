@@ -1,4 +1,5 @@
 using AgenticRagScannerApi.Exceptions;
+using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using System.Diagnostics;
@@ -22,7 +23,7 @@ public class ApiExceptionFilterAttribute : ExceptionFilterAttribute
         _exceptionHandlers = new Dictionary<Type, Action<ExceptionContext>>
         {
             { typeof(BadRequestException), HandleBadRequestException },
-            { typeof(ValidationException), HandleValidationException },
+            { typeof(ValidationException), HandleFluentValidationException },
             { typeof(ItemNotFoundException), HandleItemNotFoundException },
             { typeof(UnauthorizedAccessException), HandleUnauthorizedAccessException },
             { typeof(ConflictException), HandleConflictException }
@@ -140,11 +141,14 @@ public class ApiExceptionFilterAttribute : ExceptionFilterAttribute
         context.ExceptionHandled = true;
     }
 
-    private void HandleValidationException(ExceptionContext context)
+    private void HandleFluentValidationException(ExceptionContext context)
     {
         var exception = (ValidationException)context.Exception;
+        var errors = exception.Errors
+            .GroupBy(e => string.IsNullOrWhiteSpace(e.PropertyName) ? "validation" : e.PropertyName)
+            .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray());
 
-        var details = new ValidationProblemDetails(exception.Errors)
+        var details = new ValidationProblemDetails(errors)
         {
             Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1",
             Status = StatusCodes.Status400BadRequest,

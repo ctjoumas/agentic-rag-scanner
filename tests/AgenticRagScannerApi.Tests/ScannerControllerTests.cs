@@ -1,6 +1,9 @@
 using AgenticRagScannerApi.Controllers;
+using AgenticRagScannerApi.Mappers;
 using AgenticRagScannerApi.Models;
 using AgenticRagScannerApi.Services;
+using FluentValidation;
+using FluentValidation.Results;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -11,11 +14,17 @@ namespace AgenticRagScannerApi.Tests;
 public class ScannerControllerTests
 {
     [Fact]
-    public void Scan_WhenModelStateIsInvalid_ReturnsBadRequestValidationProblem()
+    public void Scan_WhenCustomValidatorFails_ThrowsValidationException()
     {
-        var controller = CreateController();
-        controller.ModelState.AddModelError(nameof(ScanRequest.Jurisdiction), "Jurisdiction is required.");
+        var validator = new Mock<IValidator<ScanRequest>>();
+        validator
+            .Setup(v => v.Validate(It.IsAny<ScanRequest>()))
+            .Returns(new ValidationResult(
+            [
+                new ValidationFailure(nameof(ScanRequest.Jurisdiction), "Jurisdiction is required.")
+            ]));
 
+        var controller = CreateController(validator.Object);
         var request = new ScanRequest
         {
             AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
@@ -23,11 +32,10 @@ public class ScannerControllerTests
             TopicGroups = ["Tax"],
         };
 
-        var result = controller.Scan(request);
+        var act = () => controller.Scan(request);
 
-        var badRequest = result.Should().BeOfType<ObjectResult>().Subject;
-        var details = badRequest.Value.Should().BeOfType<ValidationProblemDetails>().Subject;
-        details.Errors.Should().ContainKey(nameof(ScanRequest.Jurisdiction));
+        var exception = act.Should().Throw<ValidationException>().Which;
+        exception.Errors.Should().Contain(e => e.PropertyName == nameof(ScanRequest.Jurisdiction));
     }
 
     [Fact]
@@ -56,12 +64,24 @@ public class ScannerControllerTests
 
     private static ScannerController CreateController()
     {
+        var validator = new Mock<IValidator<ScanRequest>>();
+        validator
+            .Setup(v => v.Validate(It.IsAny<ScanRequest>()))
+            .Returns(new ValidationResult());
+
+        return CreateController(validator.Object);
+    }
+
+    private static ScannerController CreateController(IValidator<ScanRequest> scanRequestValidator)
+    {
         return new ScannerController(
             Mock.Of<IFoundryService>(),
             Mock.Of<IAzureSearchService>(),
             Mock.Of<IAzureStorageService>(),
             Mock.Of<IBingSearchGroundingService>(),
             Mock.Of<IBingCustomSearchGroundingService>(),
+            new ScanMapper(),
+            scanRequestValidator,
             Mock.Of<ILogger<ScannerController>>());
     }
 }

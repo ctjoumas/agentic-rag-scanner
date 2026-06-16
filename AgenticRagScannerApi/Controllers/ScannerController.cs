@@ -1,5 +1,7 @@
 using AgenticRagScannerApi.Models;
 using AgenticRagScannerApi.Services;
+using AgenticRagScannerApi.Mappers;
+using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AgenticRagScannerApi.Controllers;
@@ -17,6 +19,8 @@ public class ScannerController : ControllerBase
     private readonly IAzureStorageService _storageService;
     private readonly IBingSearchGroundingService _bingSearchGroundingService;
     private readonly IBingCustomSearchGroundingService _bingCustomSearchGroundingService;
+    private readonly IScanMapper _scanMapper;
+    private readonly IValidator<ScanRequest> _scanRequestValidator;
     private readonly ILogger<ScannerController> _logger;
 
     public ScannerController(
@@ -25,6 +29,8 @@ public class ScannerController : ControllerBase
         IAzureStorageService storageService,
         IBingSearchGroundingService bingSearchGroundingService,
         IBingCustomSearchGroundingService bingCustomSearchGroundingService,
+        IScanMapper scanMapper,
+        IValidator<ScanRequest> scanRequestValidator,
         ILogger<ScannerController> logger)
     {
         _foundryService = foundryService;
@@ -32,6 +38,8 @@ public class ScannerController : ControllerBase
         _storageService = storageService;
         _bingSearchGroundingService = bingSearchGroundingService;
         _bingCustomSearchGroundingService = bingCustomSearchGroundingService;
+        _scanMapper = scanMapper;
+        _scanRequestValidator = scanRequestValidator;
         _logger = logger;
     }
 
@@ -45,9 +53,10 @@ public class ScannerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public IActionResult Scan([FromBody] ScanRequest request)
     {
-        if (!ModelState.IsValid)
+        var validationResult = _scanRequestValidator.Validate(request);
+        if (!validationResult.IsValid)
         {
-            return ValidationProblem(ModelState);
+            throw new ValidationException(validationResult.Errors);
         }
 
         var runId = Guid.NewGuid().ToString("N");
@@ -57,12 +66,8 @@ public class ScannerController : ControllerBase
             runId, request.Jurisdiction, request.AsOfDate, request.TopicGroups.Count);
 
         // TODO: fan out one MAF workflow per topic group under a shared throttle
-        // (architecture-context.md §3). Deferred per §5.
-        var response = new ScanResponse
-        {
-            RunId = runId,
-            TopicGroups = request.TopicGroups,
-        };
+        // (architecture-context.md ï¿½3). Deferred per ï¿½5.
+        var response = _scanMapper.ToResponse(request, runId, DateTimeOffset.UtcNow);
 
         return AcceptedAtAction(nameof(Scan), new { runId }, response);
     }

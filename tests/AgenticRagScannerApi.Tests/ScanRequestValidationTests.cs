@@ -1,5 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
-using AgenticRagScannerApi.Models;
+﻿using AgenticRagScannerApi.Models;
+using AgenticRagScannerApi.Validators;
 using FluentAssertions;
 
 namespace AgenticRagScannerApi.Tests;
@@ -7,8 +7,9 @@ namespace AgenticRagScannerApi.Tests;
 public class ScanRequestValidationTests
 {
     [Fact]
-    public void ScanRequest_WithValidData_ShouldBeValid()
+    public void ScanRequestValidator_WithValidData_ShouldBeValid()
     {
+        var validator = new ScanRequestValidator();
         var request = new ScanRequest
         {
             AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
@@ -16,15 +17,16 @@ public class ScanRequestValidationTests
             TopicGroups = ["Financial Conduct", "AML Controls"],
         };
 
-        var isValid = TryValidate(request, out var results);
+        var result = validator.Validate(request);
 
-        isValid.Should().BeTrue();
-        results.Should().BeEmpty();
+        result.IsValid.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
     }
 
     [Fact]
-    public void ScanRequest_WithoutTopicGroups_ShouldFailValidation()
+    public void ScanRequestValidator_WithoutTopicGroups_ShouldFailValidation()
     {
+        var validator = new ScanRequestValidator();
         var request = new ScanRequest
         {
             AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
@@ -32,15 +34,16 @@ public class ScanRequestValidationTests
             TopicGroups = [],
         };
 
-        var isValid = TryValidate(request, out var results);
+        var result = validator.Validate(request);
 
-        isValid.Should().BeFalse();
-        results.Should().Contain(r => r.ErrorMessage == "At least one topic group must be selected.");
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(r => r.ErrorMessage == "At least one topic group must be selected.");
     }
 
     [Fact]
-    public void ScanRequest_WithTooShortJurisdiction_ShouldFailValidation()
+    public void ScanRequestValidator_WithTooShortJurisdiction_ShouldFailValidation()
     {
+        var validator = new ScanRequestValidator();
         var request = new ScanRequest
         {
             AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
@@ -48,16 +51,9 @@ public class ScanRequestValidationTests
             TopicGroups = ["Tax"],
         };
 
-        var isValid = TryValidate(request, out var results);
+        var result = validator.Validate(request);
 
-        isValid.Should().BeFalse();
-        results.Should().Contain(r => r.MemberNames.Contains(nameof(ScanRequest.Jurisdiction)));
-    }
-
-    private static bool TryValidate(ScanRequest request, out List<ValidationResult> results)
-    {
-        var context = new ValidationContext(request);
-        results = [];
-        return Validator.TryValidateObject(request, context, results, validateAllProperties: true);
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(r => r.PropertyName == nameof(ScanRequest.Jurisdiction));
     }
 }
