@@ -1,0 +1,64 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "restore",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "restore",
+        "${workspaceFolder}/AgenticRagScannerApi.sln"
+      ],
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "build",
+      "type": "process",
+      "command": "dotnet",
+      "dependsOn": "restore",
+      "args": [
+        "build",
+        "${workspaceFolder}/AgenticRagScannerApi.sln"
+      ],
+      "problemMatcher": "$msCompile",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "run-api",
+      "type": "process",
+      "command": "dotnet",
+      "dependsOn": "build",
+      "args": [
+        "run",
+        "--launch-profile",
+        "https",
+        "--project",
+        "${workspaceFolder}/AgenticRagScannerApi/AgenticRagScannerApi.csproj"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/AgenticRagScannerApi"
+      }
+    },
+    {
+      "label": "watch-api",
+      "type": "process",
+      "command": "dotnet",
+      "dependsOn": "restore",
+      "args": [
+        "watch",
+        "run",
+        "--launch-profile",
+        "https",
+        "--project",
+        "${workspaceFolder}/AgenticRagScannerApi/AgenticRagScannerApi.csproj"
+      ],
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}/AgenticRagScannerApi"
+      }
+    }
+  ]
+}
