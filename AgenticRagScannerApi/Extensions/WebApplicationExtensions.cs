@@ -59,6 +59,8 @@ public static class WebApplicationExtensions
     public static WebApplication MapApiEndpoints(this WebApplication app)
     {
 
+        app.MapHealthChecks("/health");
+
         app.MapControllers();
 
         return app;

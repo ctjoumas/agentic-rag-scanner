@@ -1,8 +1,11 @@
 using AgenticRagScannerApi.Configuration;
+using AgenticRagScannerApi.Core.Throttling;
 using AgenticRagScannerApi.Filters;
 using AgenticRagScannerApi.Mappers;
 using AgenticRagScannerApi.Services;
 using AgenticRagScannerApi.Validators;
+using Azure.Core;
+using Azure.Identity;
 using FluentValidation;
 using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
 
@@ -22,11 +25,11 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddConfiguredOptions(this IServiceCollection services, IConfiguration configuration)
     {
         // Configuration (Options pattern) — bind each service's settings section.
-        services.Configure<AzureStorageOptions>(configuration.GetSection(AzureStorageOptions.SectionName));
-        services.Configure<AzureSearchOptions>(configuration.GetSection(AzureSearchOptions.SectionName));
-        services.Configure<FoundryOptions>(configuration.GetSection(FoundryOptions.SectionName));
-        services.Configure<BingSearchGroundingOptions>(configuration.GetSection(BingSearchGroundingOptions.SectionName));
-        services.Configure<BingCustomSearchGroundingOptions>(configuration.GetSection(BingCustomSearchGroundingOptions.SectionName));
+        services.AddOptions<AzureStorageOptions>().Bind(configuration.GetSection(AzureStorageOptions.SectionName)).ValidateDataAnnotations();
+        services.AddOptions<AzureSearchOptions>().Bind(configuration.GetSection(AzureSearchOptions.SectionName)).ValidateDataAnnotations();
+        services.AddOptions<FoundryOptions>().Bind(configuration.GetSection(FoundryOptions.SectionName)).ValidateDataAnnotations();
+        services.AddOptions<BingSearchGroundingOptions>().Bind(configuration.GetSection(BingSearchGroundingOptions.SectionName)).ValidateDataAnnotations();
+        services.AddOptions<BingCustomSearchGroundingOptions>().Bind(configuration.GetSection(BingCustomSearchGroundingOptions.SectionName)).ValidateDataAnnotations();
 
         return services;
     }
@@ -42,6 +45,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IBingSearchGroundingService, BingSearchGroundingService>();
         services.AddSingleton<IBingCustomSearchGroundingService, BingCustomSearchGroundingService>();
         services.AddSingleton<IScanMapper, ScanMapper>();
+
+        // Shared throttle - Phase 0 pass-through; real TPM/RPM/QPS limits arrive later.
+        services.AddSingleton<ISharedThrottle, NoOpThrottle>();
+
+        // Keyless auth - inject this TokenCredential into Azure SDK clients (keys are local-dev only).
+        services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
 
         return services;
     }
@@ -66,6 +75,9 @@ public static class ServiceCollectionExtensions
         services.AddControllers(options => options.Filters.Add<ApiExceptionFilterAttribute>());
         // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
         services.AddOpenApi();
+
+        // Liveness endpoint (mapped at /health). Dependency readiness checks added later.
+        services.AddHealthChecks();
 
         return services;
     }

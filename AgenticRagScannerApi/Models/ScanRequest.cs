@@ -2,9 +2,9 @@ namespace AgenticRagScannerApi.Models;
 
 /// <summary>
 /// Manual horizon-scan trigger payload: a date + jurisdiction + the selected
-/// topic groups to scan (architecture-context.md �2). Because topic groups are
+/// topic groups to scan (architecture-context.md §2). Because topic groups are
 /// keyword OR-lists, each one becomes its own parallel workflow when the
-/// orchestration is implemented (�3).
+/// orchestration is implemented (§3).
 /// </summary>
 public class ScanRequest
 {

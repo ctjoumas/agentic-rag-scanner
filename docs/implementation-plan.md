@@ -161,7 +161,7 @@ Legend: `? arch step N` traces to `architecture-context.md` §3. **DoD** = Defin
     (`RELEVANT|BORDERLINE|NOT_RELEVANT`), `PublicationDate`, `EffectiveDate`, `AppliesFrom`,
     `AppliesTo`, `DateConfidence`, level-of-authority, `Unverified`, `runId`, `groupId`, `version`
   - `Verdict`, `LevelOfAuthority` enums
-- [ ] **(L1)** Add shared **throttle** abstraction (`ILlmThrottle`/`IRateLimiter`) — no real limits yet.
+- [ ] **(L1)** Add shared **throttle** abstraction (`ISharedThrottle`/`IRateLimiter`) — no real limits yet.
 - [ ] **(L3)** Cross-cutting: OpenTelemetry skeleton (console exporter ok for now), options
   validation (`ValidateOnStart`), `/health` endpoint, `DefaultAzureCredential` registration.
 - [ ] **(L3)** GitHub Actions CI (build + test + format).

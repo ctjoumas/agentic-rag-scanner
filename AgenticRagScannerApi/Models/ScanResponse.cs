@@ -3,7 +3,7 @@ namespace AgenticRagScannerApi.Models;
 /// <summary>
 /// Acknowledgement returned when a scan is accepted. The <see cref="RunId"/> is
 /// the anchor for the "one versioned result doc per item per run" model
-/// (architecture-context.md ง3, step 16) and ties together logs/exports for the run.
+/// (architecture-context.md ยง3, step 16) and ties together logs/exports for the run.
 /// </summary>
 public class ScanResponse
 {

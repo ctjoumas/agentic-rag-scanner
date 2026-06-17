@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace AgenticRagScannerApi.Configuration;
 
 /// <summary>
@@ -9,9 +11,11 @@ public class BingCustomSearchGroundingOptions
     public const string SectionName = "BingCustomSearchGrounding";
 
     /// <summary>Foundry connection id for the Grounding with Bing Custom Search resource.</summary>
+    [Required]
     public string ConnectionId { get; set; } = string.Empty;
 
     /// <summary>Custom search configuration id (the configured instance / allowlist).</summary>
+    [Required]
     public string CustomConfigurationId { get; set; } = string.Empty;
 
     /// <summary>API key for local development, if applicable.</summary>
