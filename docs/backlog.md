@@ -8,14 +8,14 @@
 > **Global DoD** (`implementation-plan.md §6`) applies to *every* story on top of its own criteria.
 >
 > **Note on IDs:** some story numbers are intentionally skipped where small stories were merged
-> (e.g. `1.4`, `2.3`, `3.4`). IDs are **stable references** for the board, not a contiguous sequence;
-> merged stories are annotated *(merged: former X + Y)*.
+> (e.g. `0.6`, `1.4`), and the **former `phase-2`** (background execution & run status) was **merged into `phase-1`**, with later phases **renumbered to stay contiguous**.
+> IDs are **stable references** for the board, not a contiguous sequence; merged stories are annotated *(merged: former X + Y)*.
 
 ---
 
 ## Suggested labels & milestones
 
-**Milestones (one per phase):** `phase-0` … `phase-14`.
+**Milestones (one per phase):** `phase-0` … `phase-13`.
 
 **Type labels:** `epic`, `user-story`, `task`, `spike`, `chore`, `bug`.
 **Lane labels:** `lane:L1-orchestration`, `lane:L2-agents`, `lane:L3-data-platform`.
@@ -55,7 +55,7 @@ place all projects reference.
   `Unverified`, `RunId`, `GroupId`, `Version`.
 - `Verdict` and `LevelOfAuthority` enums.
 - Reviewed & approved by all 3 engineers before merge.
-`labels: user-story, needs-design` · **depends on:** 0.1 · **blocks:** Phases 1–11.
+`labels: user-story, needs-design` · **depends on:** 0.1 · **blocks:** Phases 1–10.
 
 ### 0.4 — Shared throttle abstraction · `lane:L1-orchestration`
 **AC:** `ILlmThrottle`/rate-limiter interface in Core (no real limits yet); unit-testable; DI-registered.
@@ -73,126 +73,103 @@ text remains (primer §1).
 
 ---
 
-## Epic 1 — Run lifecycle & sequential topic-group execution · `phase-1` · *L1-led*
+## Epic 1 — Run lifecycle: synchronous scan · `phase-1` · *L1-led*
+> Synchronous request/response for the POC — no long-running/async machinery. *(Former Epic 2 —
+> background execution & run status — merged here; the async path is captured in Epic 13.)*
 
-### 1.1 — Scan orchestrator: sequential per-group execution + controller trigger · `lane:L1-orchestration`
-**As an** auditor, **I want** a scan to start from the API, **so that** each selected topic group's work runs in turn.
+### 1.1 — Scan orchestrator: synchronous sequential execution + controller trigger · `lane:L1-orchestration`
+**As an** auditor, **I want** a scan to start from the API **and return its results in the response**, **so that** I get an answer for each selected topic group in one call.
 **AC:**
-- `IScanOrchestrator` maps `ScanRequest` -> one `TopicGroupContext` per group (each seeded with an empty `SearchHistory`), then **executes them sequentially, one group at a time** (parallel fan-out is deferred to Epic 13).
-- `ScannerController.Scan` calls the orchestrator (replaces the current TODO), returns `202` + `runId`, and logs the accepted run.
-`labels: user-story, area:maf` · **depends on:** 0.3, 0.4 · *(merged: former 1.1 + 1.5)*
+- `IScanOrchestrator` maps `ScanRequest` -> one `TopicGroupContext` per group (each seeded with an empty `SearchHistory`), then runs them **sequentially, one group at a time** (parallel fan-out is deferred to Epic 12).
+- `ScannerController.Scan` calls the orchestrator (replaces the current TODO), **runs the scan synchronously and returns the aggregated results (`200`)** — no run-status/polling for the POC.
+- Shared throttle wired for outbound LLM/Bing **rate-limiting** (0.4).
+`labels: user-story, area:maf` · **depends on:** 0.3, 0.4 · *(merged: former 1.1 + 1.5 + Epic 2's sequential loop)*
 
-### 1.2 — Per-group placeholder pipeline · `lane:L1-orchestration`
-**AC:** each group runs a stub step returning a placeholder result; sequential per-group progress observable in logs.
+### 1.2 — Per-group execution step (walking skeleton -> MAF) · `lane:L1-orchestration`
+**AC:** each group runs a stub step returning a placeholder result **synchronously** (**Epic 2 replaces it with the real MAF workflow**); per-group progress + spans observable in logs (`runId`/`topicGroupId`).
 `labels: user-story` · **depends on:** 1.1.
 
-### 1.3 — Run status store + `GET /runs/{runId}` endpoint · `lane:L1-orchestration`
-**AC:**
-- In-memory store: `runId` -> status + per-group progress, queryable in-process.
-- `GET /runs/{runId}` returns run status + per-group progress; `404` for an unknown run.
-`labels: user-story` · **depends on:** 1.1 · *(merged: former 1.3 + 1.4)*
-
-**Epic demo:** `POST scan` (3 groups) -> `202` + `runId`; `GET runs/{runId}` shows the 3 groups completing **one after another** (stub).
+**Epic demo:** `POST scan` (3 groups) -> `200` with aggregated stub results; the 3 groups are processed **one after another**; logs show per-group progress. No status endpoint, no MAF yet.
 
 ---
 
-## Epic 2 — Background execution harness + cancellation (sequential) · `phase-2` · *L1-led*
-
-### 2.1 — Sequential run loop over topic groups · `lane:L1-orchestration`
-**AC:** ordered `foreach` over the run's `TopicGroupContext`s (one group completes before the next starts); shared throttle wired for outbound LLM/Bing **rate-limiting** (concurrency capping deferred to Epic 13); verified by test.
-`labels: user-story, area:maf` · **depends on:** 1.2, 0.4 · *(was: parallel execution — parallelization moved to Epic 13)*
-
-### 2.2 — Background execution + cancellation · `lane:L1-orchestration`
-**AC:**
-- HTTP trigger returns immediately; the run continues on a hosted background worker (`Channel`/queue); status reflects progress.
-- A run can be cancelled via token; partial results preserved; status shows "cancelled".
-`labels: user-story` · **depends on:** 2.1 · *(merged: former 2.2 + 2.3)*
-
-### 2.3 — Run & group traces + status metrics · `lane:L3-data-platform`
-**AC:** span per run + per group; per-group status/progress metrics emitted (in-flight concurrency metric deferred to Epic 13).
-`labels: user-story, area:observability` · **depends on:** 2.1.
-
-**Epic demo:** a scan runs in the background across 3 groups **sequentially**; live per-group progress; the run is cancellable; per-run/per-group spans visible.
-
----
-
-## Epic 3 — MAF workflow scaffolding (stub agents) · `phase-3` · *L1 + L2*
+## Epic 2 — MAF workflow scaffolding (stub agents) · `phase-2` · *L1 + L2*
 > All agents + steps present but **stubbed**. **Sync point:** agent I/O contracts frozen here.
 
-### 3.1 — `AgenticRagScanner.Workflows` + one MAF workflow per group + Cosmos checkpointing · `lane:L1-orchestration`
+### 2.1 — `AgenticRagScanner.Workflows` + one MAF workflow per group + Cosmos checkpointing · `lane:L1-orchestration`
 **AC:** Workflows project added; one MAF workflow per topic group; **MAF Cosmos checkpointing** wired to
 the shared dev Cosmos account (`checkpoints` container); a run is resumable from checkpoint.
-`labels: user-story, area:maf, area:cosmos` · **depends on:** 2.2 · `needs-design` (confirm MAF checkpoint API).
+`labels: user-story, area:maf, area:cosmos` · **depends on:** 1.1 · `needs-design` (confirm MAF checkpoint API).
 
-### 3.2 — Loop scaffold threading `SearchHistory` · `lane:L1-orchestration`
+### 2.2 — Loop scaffold threading `SearchHistory` · `lane:L1-orchestration`
 **AC:** ordered loop wired: QuerySynthesis -> BingSearch(tool) -> Pre-filter -> Fetch&Clean -> RelevanceEval ->
 LoopController -> VerdictRouting -> Enrichment -> Categorize -> Summarize&Impact; `SearchHistory` passed each pass.
-`labels: user-story, area:maf` · **depends on:** 3.1.
+`labels: user-story, area:maf` · **depends on:** 2.1.
 
-### 3.3 — Loop Controller + Verdict Routing stubs (deterministic) · `lane:L1-orchestration`
+### 2.3 — Loop Controller + Verdict Routing stubs (deterministic) · `lane:L1-orchestration`
 **AC:**
 - Loop Controller stub honors per-group `maxLoops` (default 3); appends each pass to `SearchHistory`.
 - Verdict Routing stub: RELEVANT/BORDERLINE -> enrichment; NOT_RELEVANT -> dropped + logged for audit.
-`labels: user-story` · **depends on:** 3.2 · *(merged: former 3.3 + 3.4)*
+`labels: user-story` · **depends on:** 2.2 · *(merged: former 2.3 + 2.4)*
 
-### 3.4 — Register Bing Search as an allowlist-gated tool (stub) · `lane:L2-agents`
+### 2.4 — Register Bing Search as an allowlist-gated tool (stub) · `lane:L2-agents`
 **AC:** Bing registered as a **tool/connector** (not an LLM agent), returns canned hits; allowlist hook present.
-`labels: user-story, area:bing` · **depends on:** 3.2.
+`labels: user-story, area:bing` · **depends on:** 2.2.
 
-### 3.5 — Stub: Query Synthesis Agent · `lane:L2-agents`
+### 2.5 — Stub: Query Synthesis Agent · `lane:L2-agents`
 **AC:** MAF agent definition + DI + `Prompts/QuerySynthesisPrompt.cs` placeholder; returns 1–2 canned queries.
-`labels: user-story, area:llm` · **depends on:** 0.3, 3.2.
+`labels: user-story, area:llm` · **depends on:** 0.3, 2.2.
 
-### 3.6 — Stub: Relevance Eval Agent · `lane:L2-agents`
+### 2.6 — Stub: Relevance Eval Agent · `lane:L2-agents`
 **AC:** returns canned `Verdict` + date fields; agent def + DI + prompt placeholder.
-`labels: user-story, area:llm` · **depends on:** 0.3, 3.2.
+`labels: user-story, area:llm` · **depends on:** 0.3, 2.2.
 
-### 3.7 — Stub: Enrichment Agent · `lane:L2-agents`
+### 2.7 — Stub: Enrichment Agent · `lane:L2-agents`
 **AC:** returns canned `whatItDoes` + metadata; agent def + DI + prompt placeholder.
-`labels: user-story, area:llm` · **depends on:** 0.3, 3.2.
+`labels: user-story, area:llm` · **depends on:** 0.3, 2.2.
 
-### 3.8 — Stub: Categorize Agent · `lane:L2-agents`
+### 2.8 — Stub: Categorize Agent · `lane:L2-agents`
 **AC:** returns canned impact area / regulator / approved tags; agent def + DI + prompt placeholder.
-`labels: user-story, area:llm` · **depends on:** 0.3, 3.2.
+`labels: user-story, area:llm` · **depends on:** 0.3, 2.2.
 
-### 3.9 — Stub: Summarize & Impact Agent · `lane:L2-agents`
+### 2.9 — Stub: Summarize & Impact Agent · `lane:L2-agents`
 **AC:** returns canned plain-English summary; agent def + DI + prompt placeholder.
-`labels: user-story, area:llm` · **depends on:** 0.3, 3.2.
+`labels: user-story, area:llm` · **depends on:** 0.3, 2.2.
 
 **Epic demo:** full loop runs end-to-end on fake data, loops to `maxLoops`, routes verdicts, emits stub
 `ResultItem`s, **checkpoints to Cosmos**. No external LLM/Bing calls.
 
 ---
 
-## Epic 4 — Foundry LLM service + Query Synthesis (first real agent) · `phase-4` · *L2-led*
+## Epic 3 — Foundry LLM service + Query Synthesis (first real agent) · `phase-3` · *L2-led*
 
-### 4.1 — Implement `IFoundryService` (real LLM calls) · `lane:L2-agents`
+### 3.1 — Implement `IFoundryService` (real LLM calls) · `lane:L2-agents`
 **AC:** calls Microsoft Foundry via `DefaultAzureCredential` (prefer `IChatClient` /
 `Microsoft.Extensions.AI`); resilience pipeline + shared throttle applied; token/latency metrics.
-`labels: user-story, area:llm` · **depends on:** 3.7 (or 3.6).
+`labels: user-story, area:llm` · **depends on:** 2.7 (or 2.6).
 
-### 4.2 — Prompt management convention (`Prompts/*.cs`) · `lane:L2-agents`
+### 3.2 — Prompt management convention (`Prompts/*.cs`) · `lane:L2-agents`
 **AC:** documented pattern; `QuerySynthesisPrompt.cs` builds the system prompt via interpolation; versioned.
-`labels: user-story, area:llm` · **depends on:** 4.1.
+`labels: user-story, area:llm` · **depends on:** 3.1.
 
-### 4.3 — Query Synthesis Agent (real) · `lane:L2-agents`
+### 3.3 — Query Synthesis Agent (real) · `lane:L2-agents`
 **AC:** synthesizes focused queries from the keyword set; on re-loop reads `SearchHistory` to rotate
 synonyms / avoid redundancy; agent decides query count; structured output + bounded retry on invalid JSON.
-`labels: user-story, area:llm` · **depends on:** 4.1, 4.2.
+`labels: user-story, area:llm` · **depends on:** 3.1, 3.2.
 
 **Epic demo:** real non-redundant queries; second loop targets untested synonyms/gaps.
 
 ---
 
-## Epic 5 — Bing grounding + deterministic pre-filter · `phase-5` · *L2 + L1/L3*
+## Epic 4 — Bing grounding + deterministic pre-filter · `phase-4` · *L2 + L1/L3*
 
-### 5.1 — Bing grounding services (Search + Custom Search), allowlist-gated · `lane:L2-agents`
+### 4.1 — Bing grounding services (Search + Custom Search), allowlist-gated · `lane:L2-agents`
 **AC:**
 - `IBingSearchGroundingService`: Grounding with Bing Search restricted to the primary-source allowlist **at query time**.
 - `IBingCustomSearchGroundingService`: custom-scoped config implemented to parity.
-`labels: user-story, area:bing` · **depends on:** 3.5 · *(merged: former 5.1 + 5.2)*
+`labels: user-story, area:bing` · **depends on:** 2.5 · *(merged: former 4.1 + 4.2)*
 
-### 5.3 — Deterministic pre-filter (dedupe incl. cross-group + URL validity) · `lane:L3-data-platform`
+### 4.3 — Deterministic pre-filter (dedupe incl. cross-group + URL validity) · `lane:L3-data-platform`
 **AC:** pure, unit-tested functions; cross-group dedupe; unreachable/invalid URLs dropped.
 `labels: user-story` · **depends on:** 0.3.
 
@@ -200,170 +177,171 @@ synonyms / avoid redundancy; agent decides query count; structured output + boun
 
 ---
 
-## Epic 6 — Full-text fetch & clean + blob storage · `phase-6` · *L3 + L2*
+## Epic 5 — Full-text fetch & clean + blob storage · `phase-5` · *L3 + L2*
 
-### 6.1 — `IAzureStorageService.UploadBlobAsync` (real) · `lane:L3-data-platform`
+### 5.1 — `IAzureStorageService.UploadBlobAsync` (real) · `lane:L3-data-platform`
 **AC:** BlobServiceClient + `DefaultAzureCredential`; containers from options; returns blob URI.
 `labels: user-story, area:storage` · **depends on:** 0.5.
 
-### 6.2 — Fetch & clean HTML/PDF with summary fallback · `lane:L2-agents`
+### 5.2 — Fetch & clean HTML/PDF with summary fallback · `lane:L2-agents`
 **AC:** fetch HTML/PDF, strip boilerplate; on failure fall back to Bing summary + flag `Unverified` (never drop).
-`labels: user-story` · **depends on:** 5.1.
+`labels: user-story` · **depends on:** 4.1.
 
-### 6.3 — SSRF guard on fetch · `lane:L3-data-platform`
+### 5.3 — SSRF guard on fetch · `lane:L3-data-platform`
 **AC:** allowlist enforced; private/loopback IPs blocked; caps on size/redirects/content-types; tested.
-`labels: user-story, area:security` · **depends on:** 6.2.
+`labels: user-story, area:security` · **depends on:** 5.2.
 
-### 6.4 — Persist cleaned artifacts to blob · `lane:L3-data-platform`
+### 5.4 — Persist cleaned artifacts to blob · `lane:L3-data-platform`
 **AC:** cleaned text/artifacts stored; blob URI referenced on the `ResultItem`.
-`labels: user-story, area:storage` · **depends on:** 6.1, 6.2.
+`labels: user-story, area:storage` · **depends on:** 5.1, 5.2.
 
 **Epic demo:** cleaned full-text in blob; unreachable docs -> `Unverified` via fallback; SSRF guard rejects non-allowlisted hosts.
 
 ---
 
-## Epic 7 — Relevance eval (3-verdict, date-aware) + real loop controller · `phase-7` · *L2 + L1*
+## Epic 6 — Relevance eval (3-verdict, date-aware) + real loop controller · `phase-6` · *L2 + L1*
 
-### 7.1 — Relevance Eval Agent (real, full-text, date-aware) · `lane:L2-agents`
+### 6.1 — Relevance Eval Agent (real, full-text, date-aware) · `lane:L2-agents`
 **AC:** single full-text call -> `RELEVANT/BORDERLINE/NOT_RELEVANT`; distinguishes publication vs
 effective vs tax-year dates -> fills date fields + `DateConfidence`; dates as signal, not hard filter.
-`labels: user-story, area:llm` · **depends on:** 4.1, 6.2.
+`labels: user-story, area:llm` · **depends on:** 3.1, 5.2.
 
-### 7.2 — Loop Controller + Verdict Routing (real) · `lane:L1-orchestration`
+### 6.2 — Loop Controller + Verdict Routing (real) · `lane:L1-orchestration`
 **AC:**
 - Loop Controller: re-loop if under `maxLoops` AND goal unmet, OR override if a pass is >80% RELEVANT; `maxLoops` tunable per topic group; `SearchHistory` updated each pass.
 - Verdict Routing: BORDERLINE carried forward but flagged in the data structure; NOT_RELEVANT dropped + logged.
-`labels: user-story, area:maf` · **depends on:** 7.1, 3.3 · *(merged: former 7.2 + 7.3)*
+`labels: user-story, area:maf` · **depends on:** 6.1, 2.3 · *(merged: former 6.2 + 6.3)*
 
-### 7.4 — Verdict-distribution metric + recall check on golden set · `lane:L3-data-platform`
+### 6.4 — Verdict-distribution metric + recall check on golden set · `lane:L3-data-platform`
 **AC:** verdict mix emitted as a metric; eval-harness recall check runs on the golden dataset.
-`labels: user-story, area:observability` · **depends on:** 7.1.
+`labels: user-story, area:observability` · **depends on:** 6.1.
 
 **Epic demo:** items classified with verdicts + dates; loop exits per rules; BORDERLINE flagged/carried; NOT_RELEVANT logged.
 
 ---
 
-## Epic 8 — Enrichment + Categorize + Summarize/Impact (real) · `phase-8` · *L2-led*
+## Epic 7 — Enrichment + Categorize + Summarize/Impact (real) · `phase-7` · *L2-led*
 
-### 8.1 — Enrichment Agent (real) · `lane:L2-agents`
+### 7.1 — Enrichment Agent (real) · `lane:L2-agents`
 **AC:** `whatItDoes` summary + enriched metadata on carried items.
-`labels: user-story, area:llm` · **depends on:** 4.1, 7.2.
+`labels: user-story, area:llm` · **depends on:** 3.1, 6.2.
 
-### 8.2 — Categorize Agent (real, approved tags only) · `lane:L2-agents`
+### 7.2 — Categorize Agent (real, approved tags only) · `lane:L2-agents`
 **AC:** impact area + regulator + tags from the controlled vocabulary only.
-`labels: user-story, area:llm` · **depends on:** 8.1.
+`labels: user-story, area:llm` · **depends on:** 7.1.
 
-### 8.3 — Summarize & Impact Agent (real, plain-English) · `lane:L2-agents`
+### 7.3 — Summarize & Impact Agent (real, plain-English) · `lane:L2-agents`
 **AC:** RAG over in-memory history; effective-date framing; plain-English impact summary.
-`labels: user-story, area:llm` · **depends on:** 8.1.
+`labels: user-story, area:llm` · **depends on:** 7.1.
 
 **Epic demo:** each carried item enriched, categorized with approved tags, with a plain-English impact summary.
 
 ---
 
-## Epic 9 — Quality gates + Cosmos persistence · `phase-9` · *L3-led*
+## Epic 8 — Quality gates + Cosmos persistence · `phase-8` · *L3-led*
 
-### 9.1 — Deterministic quality gates · `lane:L3-data-platform`
+### 8.1 — Deterministic quality gates · `lane:L3-data-platform`
 **AC:** JSON-schema validation; dedupe vs Cosmos; level-of-authority stamping
 (legislation > court ruling > HMRC guidance); bad/dup records rejected.
 `labels: user-story, area:cosmos` · **depends on:** 0.3.
 
-### 9.2 — `ICosmosResultStore` (versioned docs, idempotent) · `lane:L3-data-platform`
+### 8.2 — `ICosmosResultStore` (versioned docs, idempotent) · `lane:L3-data-platform`
 **AC:** Microsoft.Azure.Cosmos + `DefaultAzureCredential`; one versioned doc per item per run;
 partition-key strategy; idempotent upsert (ETag); **same account as MAF checkpoints**, separate `results` container.
-`labels: user-story, area:cosmos` · **depends on:** 9.1, 3.1.
+`labels: user-story, area:cosmos` · **depends on:** 8.1, 2.1.
 
 **Epic demo:** results persisted as versioned Cosmos docs; re-run does not duplicate; authority stamped.
 
 ---
 
-## Epic 10 — Publish & export · `phase-10` · *L3-led*
+## Epic 9 — Publish & export · `phase-9` · *L3-led*
 
-### 10.1 — Publish view + CSV/Excel export · `lane:L3-data-platform`
+### 9.1 — Publish view + CSV/Excel export · `lane:L3-data-platform`
 **AC:**
 - Completed run auto-produces the published-update view (generic publishing target — no customer brand).
 - CSV/Excel export generated to blob; endpoint returns a download/link.
-`labels: user-story, area:storage` · **depends on:** 9.2, 6.1 · *(merged: former 10.1 + 10.2)*
+`labels: user-story, area:storage` · **depends on:** 8.2, 5.1 · *(merged: former 9.1 + 9.2)*
 
 **Epic demo:** completed run yields a downloadable CSV/Excel of published updates.
 
 ---
 
-## Epic 11 — Memory / learnings store (Azure AI Search) · `phase-11` · *L3 + L2* · `future`-leaning
+## Epic 10 — Memory / learnings store (Azure AI Search) · `phase-10` · *L3 + L2* · `future`-leaning
 
-### 11.1 — `IAzureSearchService` for curated learnings · `lane:L3-data-platform`
+### 10.1 — `IAzureSearchService` for curated learnings · `lane:L3-data-platform`
 **AC:** Azure.Search.Documents + `DefaultAzureCredential`; index for learnings; vector/hybrid retrieval.
 `labels: user-story, area:search` · **depends on:** 0.5.
 
-### 11.2 — Feed retrieved learnings into synthesis + eval · `lane:L2-agents`
+### 10.2 — Feed retrieved learnings into synthesis + eval · `lane:L2-agents`
 **AC:** learnings retrieved (scoped to jurisdiction + topic group, top-K + recency) and injected into
 Query Synthesis + Relevance Eval; distinct from per-run `SearchHistory`.
-`labels: user-story, area:llm` · **depends on:** 11.1, 4.3, 7.1.
+`labels: user-story, area:llm` · **depends on:** 10.1, 3.3, 6.1.
 
 **Epic demo:** prior-run learnings retrieved and demonstrably influence queries/eval.
 
 ---
 
-## Epic 12 — Hardening: evals, throttle tuning, dashboards, security · `phase-12` · *all lanes*
+## Epic 11 — Hardening: evals, throttle tuning, dashboards, security · `phase-11` · *all lanes*
 
-### 12.1 — Formal eval suite (CI-gated) · `lane:L2-agents`
+### 11.1 — Formal eval suite (CI-gated) · `lane:L2-agents`
 **AC:** relevance/groundedness/recall on the golden dataset; runs in CI; scores tracked over time.
 `labels: user-story, area:llm`.
 
-### 12.2 — Load/throttle tuning · `lane:L1-orchestration`
+### 11.2 — Load/throttle tuning · `lane:L1-orchestration`
 **AC:** stays within TPM/RPM/QPS under load; backpressure verified; limits documented.
 `labels: user-story, area:maf`.
 
-### 12.3 — App Insights dashboards + alerts · `lane:L3-data-platform`
+### 11.3 — App Insights dashboards + alerts · `lane:L3-data-platform`
 **AC:** dashboards for latency, tokens/cost, verdict mix, failures; alerts configured.
 `labels: user-story, area:observability`.
 
-### 12.4 — Security review · `lane:L3-data-platform`
+### 11.4 — Security review · `lane:L3-data-platform`
 **AC:** SSRF, secrets hygiene, least-privilege RBAC reviewed; findings tracked.
 `labels: user-story, area:security`.
 
 ---
 
-## Epic 13 — Fan-out & parallelization (MAF) · `phase-13` · *L1-led*
+## Epic 12 — Fan-out & parallelization (MAF) · `phase-12` · *L1-led*
 > Deferred on purpose: get the whole pipeline running **correctly and sequentially** first, then add
-> concurrency. Replace the sequential run loop (2.1) with parallel per-topic-group execution under the
-> shared throttle once Epics 1–12 are green.
+> concurrency. Replace the sequential run loop (1.1) with parallel per-topic-group execution under the
+> shared throttle once Epics 1–11 are green.
 
-### 13.1 — Run topic-group workflows in parallel under the shared throttle · `lane:L1-orchestration`
-**AC:** replace the sequential loop (2.1) with `Task.WhenAll` gated by the shared throttle; active workers capped; per-group isolation preserved (one group failing does not abort the run); verified by test.
-`labels: user-story, area:maf` · **depends on:** 2.2, 0.4 · after Epics 3–10 are green · *(parallel scope split out of former 2.1)*
+### 12.1 — Run topic-group workflows in parallel under the shared throttle · `lane:L1-orchestration`
+**AC:** replace the sequential loop (1.1) with `Task.WhenAll` gated by the shared throttle; active workers capped; per-group isolation preserved (one group failing does not abort the run); verified by test.
+`labels: user-story, area:maf` · **depends on:** 1.1, 0.4 · after Epics 2–9 are green · *(parallel scope; was Epic 2)*
 
-### 13.2 — In-flight concurrency traces & metrics · `lane:L3-data-platform`
+### 12.2 — In-flight concurrency traces & metrics · `lane:L3-data-platform`
 **AC:** in-flight concurrency gauge + throttle wait-time metric emitted; parallel spans visible per run/group.
-`labels: user-story, area:observability` · **depends on:** 13.1 · *(was former 2.3's concurrency metric)*
+`labels: user-story, area:observability` · **depends on:** 12.1 · *(was Epic 2's concurrency metric)*
 
-### 13.3 — Load/throttle tuning under parallel load · `lane:L1-orchestration`
+### 12.3 — Load/throttle tuning under parallel load · `lane:L1-orchestration`
 **AC:** stays within TPM/RPM/QPS with N groups in flight; backpressure verified; per-group cap tuned and documented.
-`labels: user-story, area:maf` · **depends on:** 13.1, 12.2.
+`labels: user-story, area:maf` · **depends on:** 12.1, 11.2.
 
 **Epic demo:** the same pipeline that ran sequentially now runs topic groups **concurrently** under the throttle; throughput improves; the throttle caps active workers; parallel spans visible; cancellation still works.
 
 ---
 
-## Epic 14 — FUTURE / post-POC (backlog) · `phase-14` · `future`
+## Epic 13 — FUTURE / post-POC (backlog) · `phase-13` · `future`
 > Not scheduled for the POC; captured so they aren't lost (primer §5 deferrals).
 
-- **14.1** Azure Function timer host (scheduled scans) · `lane:L1-orchestration` · `future`
-- **14.2** Bicep IaC for all resources + Managed Identity role assignments · `lane:L3-data-platform` · `future`
-- **14.3** Admin UI — review of past runs · `future`
-- **14.4** Structured review capture (verdict correction + reason-code tags + freeform note) · `future`
-- **14.5** Distillation job -> curated guidance rules into memory store · `future`
+- **13.1** Azure Function timer host (scheduled scans) · `lane:L1-orchestration` · `future`
+- **13.2** Bicep IaC for all resources + Managed Identity role assignments · `lane:L3-data-platform` · `future`
+- **13.3** Admin UI — review of past runs · `future`
+- **13.4** Structured review capture (verdict correction + reason-code tags + freeform note) · `future`
+- **13.5** Distillation job -> curated guidance rules into memory store · `future`
+- **13.6** Async execution mode — background run + run-status store + `GET /runs/{runId}` polling + cancellation (merged out of the old Epic 2). Pull only if synchronous scans outgrow gateway timeouts (~230s on App Service) or a live-progress UI is needed (pairs with 13.3). · `lane:L1-orchestration` · `future`
 
 ---
 
 ## Sequencing cheat-sheet (what to pull first)
 
 1. **Sprint-start (do as a group):** all of **Epic 0** — 0.1 -> 0.3 unblock everything. Pair on 0.3.
-2. **Then L1** takes **Epic 1 -> 2 -> 3 (workflow + controller stubs 3.1–3.3, 3.5)**.
-3. **In parallel L2** takes **Epic 3 agent stubs (3.6–3.10)** -> **Epic 4**.
-4. **In parallel L3** takes **0.5/0.6**, then **Epic 6 storage (6.1)** and **Epic 9** prep.
-5. **Sync points:** end of Epic 0 (contracts) and end of Epic 3 (agent I/O frozen).
-6. **Keep execution sequential:** run topic groups **one at a time** through Epics 1–12; pull **Epic 13 (fan-out & parallelization)** only once the sequential pipeline is green end-to-end.
+2. **Then L1** takes **Epic 1**, then the **Epic 2 workflow + controller stubs (2.1–2.3)**.
+3. **In parallel L2** takes the **Epic 2 agent + tool stubs (2.4–2.9)**, then **Epic 3**.
+4. **In parallel L3** takes **0.5/0.7**, then **Epic 5 storage (5.1)** and **Epic 8** prep.
+5. **Sync points:** end of Epic 0 (contracts) and end of Epic 2 (agent I/O frozen).
+6. **Keep execution sequential:** run topic groups **one at a time** through Epics 1–11; pull **Epic 12 (fan-out & parallelization)** only once the sequential pipeline is green end-to-end.
 
 ---
 

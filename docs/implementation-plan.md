@@ -131,7 +131,7 @@ Keep it light; do it once in Phase 0.
 AgenticRagScanner.sln
  AgenticRagScannerApi/            # host: controllers, DI, Program.cs (exists)
  AgenticRagScanner.Core/          # NEW: domain models, enums, interfaces, SearchHistory, ResultItem
- AgenticRagScanner.Workflows/     # NEW: MAF workflow + agents (L1/L2)  [added in Phase 3]
+ AgenticRagScanner.Workflows/     # NEW: MAF workflow + agents (L1/L2)  [added in Phase 2]
  AgenticRagScanner.Tests/         # NEW: unit/contract/integration/eval tests
 ```
 
@@ -174,44 +174,25 @@ compile and are referenced by the API.
 
 ---
 
-### Phase 1 — Run lifecycle & sequential topic-group execution · *L1-led*
-**Goal:** accept the request, iterate the selected topic groups **sequentially** (one at a time), and run a placeholder per-group task. *(Parallel fan-out is deferred to Phase 13.)*
-`? arch steps 1–2`
+### Phase 1 — Run lifecycle: synchronous scan · *L1-led*
+**Goal:** accept the request, iterate the selected topic groups **sequentially** (one at a time), and **return the aggregated results in the HTTP response**. Synchronous for the POC — no run-status/background machinery. *(Parallel fan-out is deferred to Phase 12; the async path is captured in Phase 13.)*
+`-> arch steps 1–2`
 
 **Tasks**
-- [ ] **(L1)** `IScanOrchestrator` + implementation: map `ScanRequest` ? one `TopicGroupContext`
+- [ ] **(L1)** `IScanOrchestrator` + implementation: map `ScanRequest` -> one `TopicGroupContext`
   per group (each seeded with an empty `SearchHistory`), then run them **one at a time**.
-- [ ] **(L1)** Per-group **placeholder** pipeline (returns a stub result) so **sequential per-group** progress is observable.
-- [ ] **(L1)** Run **status store** (in-memory): `runId` ? status + per-group progress.
-- [ ] **(L1)** `GET /api/v1/scanner/runs/{runId}` status endpoint.
-- [ ] **(L1)** Wire `ScannerController.Scan` to start the run and return `202` + `runId` (replace TODO).
+- [ ] **(L1)** Per-group **placeholder** step (returns a stub result) so **sequential per-group** progress is observable; Phase 2 swaps it for the real MAF workflow.
+- [ ] **(L1)** Wire `ScannerController.Scan` to run the scan **synchronously** and return `200` with the aggregated results (replace TODO).
+- [ ] **(L1)** Wire the shared throttle for outbound LLM/Bing rate-limiting (concurrency capping deferred to Phase 12).
 - [ ] **(L3)** Structured logging scopes (`runId`, `topicGroupId`) around the sequential per-group loop.
 
-**DoD / demo:** `POST scan` with 3 topic groups ? `202` + `runId`; `GET runs/{runId}` shows 3 groups
-moving one-by-one to "completed (stub)". No MAF yet.
+**DoD / demo:** `POST scan` with 3 topic groups -> `200` with aggregated stub results; the 3 groups complete one-by-one. No status endpoint, no MAF yet.
+
+> **Sync point:** end of Phase 1 the **synchronous run harness is ready**. L2 and L3 can build agents/data against the contracts largely independently.
 
 ---
 
-### Phase 2 — Background execution harness + cancellation (sequential) · *L1-led*
-**Goal:** run the group pipelines **sequentially** (one group at a time; parallel execution deferred to Phase 13) and make scans
-long-running/background. `? arch steps 2–3 (concurrency, arch §4)`
-
-**Tasks**
-- [ ] **(L1)** Execute groups in a **sequential loop** (`foreach`) over the run's topic groups; wire the shared throttle for outbound rate-limiting (concurrency capping deferred to Phase 13).
-- [ ] **(L1)** Background execution (e.g. hosted background queue/`Channel`) so the HTTP call
-  returns immediately and the run continues; status endpoint reflects progress.
-- [ ] **(L1)** Cancellation: cancel a run via token; partial results preserved.
-- [ ] **(L3)** Traces/metrics: span per run, per group; per-group status/progress metrics (in-flight concurrency metric deferred to Phase 13).
-
-**DoD / demo:** 3 groups run **sequentially** in the background; status shows live
-progress; a run can be cancelled; per-run/per-group spans visible.
-
-> **Sync point:** end of Phase 2 the **skeleton is ready**. L2 and L3 can now build agents/data
-> against the contracts largely independently.
-
----
-
-### Phase 3 — MAF workflow scaffolding (stub agents) · *L1 + L2*
+### Phase 2 — MAF workflow scaffolding (stub agents) · *L1 + L2*
 **Goal:** introduce **Microsoft Agent Framework** and build the **agentic RAG loop** per group with
 **all agents + steps present but stubbed** (canned, schema-valid outputs). `? arch step 3 (loop), 4–14 as stubs`
 
@@ -231,11 +212,11 @@ each unit independently testable.
 
 | # | Agent (LLM) | Role in the workflow | Input ? Output (contract) | Real impl. phase |
 |---|-------------|----------------------|---------------------------|------------------|
-| 4 | **Query Synthesis Agent** | Turn the topic-group keyword/synonym OR-list into focused search quer(ies); on re-loops read `SearchHistory` to rotate synonyms / fill gaps. Decides *how many* queries. | `TopicGroupContext` + `SearchHistory` ? `string[] queries` | **4** |
-| 9 | **Relevance Eval Agent** | Single full-text call ? `RELEVANT/BORDERLINE/NOT_RELEVANT`; effective-date aware; applies retrieved learnings; judges goal coverage. | cleaned full text + dates + `SearchHistory` ? `Verdict` + date fields + rationale | **7** |
-| 12 | **Enrichment Agent** | Post-verdict enrichment only (relevance already decided): `whatItDoes` summary + metadata. | carried `ResultItem` ? enriched `ResultItem` | **8** |
-| 13 | **Categorize Agent** | Assign impact area, regulator, and **approved tags only** (controlled vocabulary). | enriched `ResultItem` ? category fields | **8** |
-| 14 | **Summarize & Impact Agent** | RAG over in-memory history ? plain-English impact summary + effective-date framing. | enriched `ResultItem` + `SearchHistory` ? summary/impact | **8** |
+| 4 | **Query Synthesis Agent** | Turn the topic-group keyword/synonym OR-list into focused search quer(ies); on re-loops read `SearchHistory` to rotate synonyms / fill gaps. Decides *how many* queries. | `TopicGroupContext` + `SearchHistory` ? `string[] queries` | **3** |
+| 9 | **Relevance Eval Agent** | Single full-text call ? `RELEVANT/BORDERLINE/NOT_RELEVANT`; effective-date aware; applies retrieved learnings; judges goal coverage. | cleaned full text + dates + `SearchHistory` ? `Verdict` + date fields + rationale | **6** |
+| 12 | **Enrichment Agent** | Post-verdict enrichment only (relevance already decided): `whatItDoes` summary + metadata. | carried `ResultItem` ? enriched `ResultItem` | **7** |
+| 13 | **Categorize Agent** | Assign impact area, regulator, and **approved tags only** (controlled vocabulary). | enriched `ResultItem` ? category fields | **7** |
+| 14 | **Summarize & Impact Agent** | RAG over in-memory history ? plain-English impact summary + effective-date framing. | enriched `ResultItem` + `SearchHistory` ? summary/impact | **7** |
 
 > The two controller nodes — **Loop Controller (10)** and **Verdict Routing (11)** — are deterministic
 > orchestration owned by **L1**, not agents. Bing Search (5) is registered as a **tool/connector** so
@@ -244,7 +225,7 @@ each unit independently testable.
 
 **Tasks — workflow & orchestration (L1)**
 - [ ] Add `AgenticRagScanner.Workflows`; define **one MAF workflow per topic group**, with MAF
-  **Cosmos checkpointing** wired to the shared Azure Cosmos account (see Phase 9) so long runs are durable/resumable.
+  **Cosmos checkpointing** wired to the shared Azure Cosmos account (see Phase 8) so long runs are durable/resumable.
 - [ ] Build the loop scaffold threading `SearchHistory` through each pass:
   `QuerySynthesis ? BingSearch(tool) ? Pre-filter ? Fetch&Clean ? RelevanceEval ? LoopController ?`
   `VerdictRouting ? Enrichment ? Categorize ? Summarize&Impact`.
@@ -271,7 +252,7 @@ routes verdicts, emits stub `ResultItem`s, and **checkpoints to Cosmos**. No ext
 
 ---
 
-### Phase 4 — Foundry LLM service + Query Synthesis Agent (first real agent) · *L2-led*
+### Phase 3 — Foundry LLM service + Query Synthesis Agent (first real agent) · *L2-led*
 **Goal:** make LLM calls real; implement the first agent. `? arch step 4`
 
 **Tasks**
@@ -288,7 +269,7 @@ untested synonyms/gaps.
 
 ---
 
-### Phase 5 — Bing grounding search + deterministic pre-filter · *L2 + L1/L3*
+### Phase 4 — Bing grounding search + deterministic pre-filter · *L2 + L1/L3*
 **Goal:** real grounded search restricted to the allowlist, then deterministic pre-filter.
 `? arch steps 5–6`
 
@@ -304,7 +285,7 @@ across groups) removed; dead URLs dropped.
 
 ---
 
-### Phase 6 — Full-text fetch & clean + blob storage · *L3 + L2*
+### Phase 5 — Full-text fetch & clean + blob storage · *L3 + L2*
 **Goal:** fetch & clean source content; persist artifacts. `? arch step 7`
 
 **Tasks**
@@ -320,7 +301,7 @@ summary fallback; SSRF guard rejects non-allowlisted hosts.
 
 ---
 
-### Phase 7 — Relevance eval (3-verdict, date-aware) + real loop controller · *L2 + L1*
+### Phase 6 — Relevance eval (3-verdict, date-aware) + real loop controller · *L2 + L1*
 **Goal:** the core compliance decision + loop exit logic. `? arch steps 9–11`
 
 **Tasks**
@@ -341,7 +322,7 @@ flagged and carried; NOT_RELEVANT logged.
 
 ---
 
-### Phase 8 — Enrichment + Categorize + Summarize/Impact agents · *L2-led*
+### Phase 7 — Enrichment + Categorize + Summarize/Impact agents · *L2-led*
 **Goal:** finish the downstream agents. `? arch steps 12–14`
 
 **Tasks**
@@ -355,7 +336,7 @@ plain-English impact summary.
 
 ---
 
-### Phase 9 — Deterministic quality gates + Cosmos persistence · *L3-led*
+### Phase 8 — Deterministic quality gates + Cosmos persistence · *L3-led*
 **Goal:** validate, dedupe vs store, stamp authority, persist. `? arch steps 15–16`
 
 **Tasks**
@@ -364,7 +345,7 @@ plain-English impact summary.
 - [ ] **(L3)** `ICosmosResultStore` (Microsoft.Azure.Cosmos + `DefaultAzureCredential`):
   **one versioned doc per item per run**; partition-key strategy (e.g. by jurisdiction or `runId`);
   **idempotent** upsert (ETag/optimistic concurrency).
-- [ ] **(L3)** Reuse the **same Azure Cosmos account as the MAF checkpoint store** (see Phase 3) —
+- [ ] **(L3)** Reuse the **same Azure Cosmos account as the MAF checkpoint store** (see Phase 2) —
   separate containers for `checkpoints` vs `results`; one account, no emulator.
 
 **DoD / demo:** results persisted in Cosmos as versioned docs; re-running a run does not duplicate;
@@ -372,7 +353,7 @@ authority level stamped.
 
 ---
 
-### Phase 10 — Publish & export · *L3-led*
+### Phase 9 — Publish & export · *L3-led*
 **Goal:** publish results and export. `? arch step 17`
 
 **Tasks**
@@ -383,7 +364,7 @@ authority level stamped.
 
 ---
 
-### Phase 11 — Memory / learnings store (Azure AI Search) · *L3 + L2* · *was FUTURE #8*
+### Phase 10 — Memory / learnings store (Azure AI Search) · *L3 + L2* · *was FUTURE #8*
 **Goal:** cross-run learnings feeding synthesis + eval. `? arch step 8 (planned)`
 
 **Tasks**
@@ -396,7 +377,7 @@ authority level stamped.
 
 ---
 
-### Phase 12 — Hardening: evals, throttle tuning, dashboards, security · *all lanes*
+### Phase 11 — Hardening: evals, throttle tuning, dashboards, security · *all lanes*
 **Goal:** make it production-credible.
 
 **Tasks**
@@ -409,13 +390,13 @@ authority level stamped.
 
 ---
 
-### Phase 13 — Fan-out & parallelization (MAF) · *L1-led*
+### Phase 12 — Fan-out & parallelization (MAF) · *L1-led*
 **Goal:** now that the whole pipeline runs reliably **end-to-end and sequentially**, introduce
 parallel per-topic-group execution under the shared throttle. Deferred here on purpose to de-risk
 threading and keep the early phases focused on the core RAG loop.
 
 **Tasks**
-- [ ] **(L1)** Replace the sequential run loop (Phase 2) with `Task.WhenAll` gated by the shared
+- [ ] **(L1)** Replace the sequential run loop (Phase 1) with `Task.WhenAll` gated by the shared
   throttle; **cap active workers**; preserve per-group isolation (one group failing does not abort the run).
 - [ ] **(L1)** Per-group cancellation still honored under parallel execution; partial results preserved.
 - [ ] **(L3)** Concurrency telemetry: in-flight concurrency gauge + throttle wait-time metric; parallel spans per run/group.
@@ -426,35 +407,35 @@ the throttle; throughput improves; the throttle caps active workers; parallel sp
 
 ---
 
-### Phase 14 — FUTURE / post-POC (not scheduled) · *backlog*
+### Phase 13 — FUTURE / post-POC (not scheduled) · *backlog*
 `? arch steps 18–20 + primer §5 deferrals`
 - [ ] Azure **Function** timer host (scheduled scans) alongside the Web API.
 - [ ] **Bicep** infra-as-code for all resources + Managed Identity role assignments.
 - [ ] **Admin UI** — review of past runs.
 - [ ] **Structured review capture** (verdict correction + reason codes + notes).
-- [ ] **Distillation job** rolling reviews into curated guidance ? memory store (Phase 11).
+- [ ] **Distillation job** rolling reviews into curated guidance ? memory store (Phase 10).
+- [ ] **Async execution mode** — background run + run-status store + `GET /runs/{runId}` polling + cancellation (merged out of the old Phase 2). Only needed if synchronous scans outgrow gateway timeouts (~230s on App Service) or a live-progress UI is wanted.
 
 ---
 
 ## 5. Dependency & parallelization map
 
 ```
-Phase 0 (contracts) ????> Phase 1 ?> Phase 2 ???> Phase 3 (skeleton) ??> from here, parallel:
-                      ?                        ?
-                      ?                        ?? L2 track: Phase 4 ?> 5 ?> 6 ?> 7 ?> 8
-                      ?                        ?
-                      ??????????????????????????? L3 track: Phase 6 (storage) ? Phase 9 ?> 10 ?> 11
-                                               ?
-                                               ?? L1 track: Phase 7 loop controller ? Phase 12 tuning
+Phase 0 (contracts) --> Phase 1 --> Phase 2 (skeleton) --> from here, parallel:
+                                                  |
+                                                  +-- L2 track: Phase 3 -> 4 -> 5 -> 6 -> 7
+                                                  |
+                                                  +-- L3 track: Phase 5 (storage) -> Phase 8 -> 9 -> 10
+                                                  |
+                                                  +-- L1 track: Phase 6 loop controller -> Phase 11 tuning
 ```
 
-- **Serial spine (everyone depends on):** Phase 0 ? 1 ? 2 ? 3.
-- **After Phase 3**, the three lanes proceed largely in parallel:
-  - **L2** drives the agent chain (4 ? 5 ? 6 fetch ? 7 ? 8).
-  - **L3** drives storage (6) + persistence/export/memory (9 ? 10 ? 11) — can start storage early.
-  - **L1** owns loop controller/verdict routing (7), the sequential run harness (2), and **fan-out/parallelization (13)** plus throttle tuning (12).
-- **Integration sync points:** end of Phase 0 (contracts), end of Phase 3 (loop shape), and before
-  Phase 9 (ResultItem schema final).
+- **Serial spine (everyone depends on):** Phase 0 -> 1 -> 2.
+- **After Phase 2**, the three lanes proceed largely in parallel:
+  - **L2** drives the agent chain (3 -> 4 -> 5 fetch -> 6 -> 7).
+  - **L3** drives storage (5) + persistence/export/memory (8 -> 9 -> 10), and can start storage early.
+  - **L1** owns loop controller/verdict routing (6), the **synchronous run harness (1)**, and **fan-out/parallelization (12)** plus throttle tuning (11).
+- **Integration sync points:** end of Phase 0 (contracts), end of Phase 2 (loop shape), and before Phase 8 (ResultItem schema final).
 
 ---
 
@@ -483,5 +464,5 @@ Split Phase 0 across the team immediately:
 - **L1:** throttle abstraction + run/group context shapes.
 - **L2:** `SearchHistory` + `ResultItem` + verdict/date enums (the agent-facing contracts).
 
-Once Phase 0 merges, branch **Phase 1** (`feat/phase-1-sequential-execution`, L1-led) while L2/L3
+Once Phase 0 merges, branch **Phase 1** (`feat/phase-1-synchronous-scan`, L1-led) while L2/L3
 begin prepping their tracks against the frozen contracts.
