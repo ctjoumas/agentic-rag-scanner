@@ -29,5 +29,10 @@
     "ConnectionId": "<your-bing-custom-search-grounding-connection-id>",
     "CustomConfigurationId": "<your-custom-configuration-id>",
     "ApiKey": ""
+  },
+  "Cosmos": {
+    "Endpoint": "https://cosmoswxdev001.documents.azure.com:443/",
+    "Database": "agentic-rag-scanner",
+    "CheckpointsContainer": "checkpoints"
   }
 }

@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AgenticRagScannerApi.Core\AgenticRagScannerApi.Core.csproj" />
+    <ProjectReference Include="..\AgenticRagScannerApi.Workflows\AgenticRagScannerApi.Workflows.csproj" />
   </ItemGroup>
 
 </Project>
