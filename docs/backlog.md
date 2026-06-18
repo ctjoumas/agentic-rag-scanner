@@ -58,12 +58,13 @@ place all projects reference.
 `labels: user-story, needs-design` · **depends on:** 0.1 · **blocks:** Phases 1–10.
 
 ### 0.4 — Shared throttle abstraction · `lane:L1-orchestration`
-**AC:** `ILlmThrottle`/rate-limiter interface in Core (no real limits yet); unit-testable; DI-registered.
+**AC:** `ISharedThrottle`/rate-limiter interface in Core (no real limits yet); unit-testable; DI-registered.
 `labels: user-story, area:maf` · **depends on:** 0.1.
 
 ### 0.5 — Cross-cutting skeleton: OTel + options validation + health + identity · `lane:L3-data-platform`
-**AC:** OpenTelemetry wired (console exporter ok); `*Options` use `ValidateDataAnnotations()` +
+**AC:** OpenTelemetry **deferred** (see note); `*Options` use `ValidateDataAnnotations()` +
 `ValidateOnStart()`; `/health` endpoint healthy; `DefaultAzureCredential` registered.
+> **Note (deferred):** OpenTelemetry skeleton deferred - the app already ships Serilog -> Console + App Insights for structured logging; OTel traces/metrics will be added in a dedicated observability step once agents emit token/latency/verdict telemetry (Phase 3+).
 `labels: user-story, area:observability` · **depends on:** 0.1.
 
 ### 0.7 — Chore: genericize customer material in design doc · `lane:L3-data-platform`

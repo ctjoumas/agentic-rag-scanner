@@ -68,3 +68,4 @@ appsettings.*.Local.json
 *.suo
 *.userosscache
 *.sln.docstates
+/AgenticRagScannerApi/appsettings.Local.json

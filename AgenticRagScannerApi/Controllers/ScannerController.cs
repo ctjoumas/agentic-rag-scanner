@@ -66,7 +66,7 @@ public class ScannerController : ControllerBase
             runId, request.Jurisdiction, request.AsOfDate, request.TopicGroups.Count);
 
         // TODO: fan out one MAF workflow per topic group under a shared throttle
-        // (architecture-context.md �3). Deferred per �5.
+        // (architecture-context.md §3). Deferred per §5.
         var response = _scanMapper.ToResponse(request, runId, DateTimeOffset.UtcNow);
 
         return AcceptedAtAction(nameof(Scan), new { runId }, response);

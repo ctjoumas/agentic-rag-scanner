@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace AgenticRagScannerApi.Configuration;
 
 /// <summary>
@@ -12,6 +14,8 @@ public class AzureStorageOptions
     /// Blob service endpoint, e.g. https://{account}.blob.core.windows.net.
     /// Prefer Managed Identity / DefaultAzureCredential over connection strings.
     /// </summary>
+    [Required]
+    [Url]
     public string BlobServiceUri { get; set; } = string.Empty;
 
     /// <summary>
@@ -21,8 +25,10 @@ public class AzureStorageOptions
     public string? ConnectionString { get; set; }
 
     /// <summary>Container for fetched source documents.</summary>
+    [Required]
     public string DocumentsContainer { get; set; } = string.Empty;
 
     /// <summary>Container for generated exports (CSV/Excel).</summary>
+    [Required]
     public string ExportsContainer { get; set; } = string.Empty;
 }

@@ -1,0 +1,52 @@
+# CI pipeline for AgenticRagScannerApi (backlog story 0.2).
+#
+# Runs on every pull request targeting `main` and on every push to `main`.
+# Steps run in cost-ascending order so cheap checks fail fast:
+#   restore -> format check -> build -> test.
+#
+# NOTE: Marking this workflow as a *required status check* is a GitHub
+# branch-protection setting and cannot be configured from this file.
+# In GitHub: Settings -> Branches -> Branch protection rules -> add/edit a
+# rule for `main` -> "Require status checks to pass before merging" ->
+# select the "build-test-format" check.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel superseded runs for the same ref to avoid stacked CI.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-format:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore AgenticRagScannerApi.sln
+
+      - name: Format check
+        run: dotnet format AgenticRagScannerApi.sln --verify-no-changes --no-restore
+
+      - name: Build
+        run: dotnet build AgenticRagScannerApi.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/AgenticRagScannerApi.Tests/AgenticRagScannerApi.Tests.csproj --configuration Release --no-build

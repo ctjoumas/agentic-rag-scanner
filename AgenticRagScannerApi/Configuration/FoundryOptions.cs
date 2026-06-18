@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace AgenticRagScannerApi.Configuration;
 
 /// <summary>
@@ -9,9 +11,12 @@ public class FoundryOptions
     public const string SectionName = "Foundry";
 
     /// <summary>Foundry project endpoint.</summary>
+    [Required]
+    [Url]
     public string Endpoint { get; set; } = string.Empty;
 
     /// <summary>Model deployment used for the agent LLM calls.</summary>
+    [Required]
     public string ModelDeploymentName { get; set; } = string.Empty;
 
     /// <summary>
