@@ -114,7 +114,7 @@ can be fixed for the project or rotate per phase.
 | Lane | Focus | Owns (interfaces/areas) |
 |------|-------|-------------------------|
 | **L1 — Orchestration & Workflow** | Run lifecycle, fan-out, parallelism, shared throttle, MAF workflow + loop controller, verdict routing | `IScanOrchestrator`, MAF workflow/agent host, loop controller, throttle |
-| **L2 — AI Agents & Grounding** | Foundry/LLM service, prompts, the 5 LLM agents, Bing grounding, fetch & clean, evals | `IFoundryService`, agent implementations, `IBingSearchGroundingService`, `IBingCustomSearchGroundingService`, fetch/clean |
+| **L2 — AI Agents & Grounding** | Foundry model deployment/LLM service, prompts, the **Query Synthesis Foundry agent** (Grounding with Bing Custom Search tool) + the four MAF agents (over a Foundry deployment), fetch & clean, evals | `IFoundryService` (Foundry project + model deployment), the Query Synthesis **Foundry agent** (Bing Custom Search grounding tool), MAF agent implementations, fetch/clean |
 | **L3 — Data, Quality & Platform** | Cosmos persistence, quality gates, blob storage, export/publish, Azure AI Search memory, observability, infra/CI | `IAzureStorageService`, `IAzureSearchService`, `ICosmosResultStore`, quality gates, export, OTel, Bicep |
 
 > **Sync points** are called out per phase (the moments lanes must integrate). Outside those,
@@ -197,50 +197,57 @@ compile and are referenced by the API.
 **all agents + steps present but stubbed** (canned, schema-valid outputs). `? arch step 3 (loop), 4–14 as stubs`
 
 #### Agents vs. deterministic steps (important)
-You're right that the loop is built from **MAF agents** — but **not every node is an LLM agent**.
-The design-doc diagram marks five **"Agent"** nodes (LLM-backed); the rest are **deterministic
-tools/steps** the workflow calls between agents. Getting this split right keeps cost down and makes
-each unit independently testable.
+You're right that the loop is built from **MAF agents** — but **not every node is an LLM agent**, and
+the agents are **hosted two different ways**. The design-doc diagram marks five **"Agent"** nodes
+(LLM-backed); the rest are **deterministic tools/steps** the workflow calls between agents. Getting
+this split right keeps cost down and makes each unit independently testable.
 
-- **LLM agents (5):** Query Synthesis (4), Relevance Eval (9), Enrichment (12), Categorize (13),
-  Summarize & Impact (14).
-- **Deterministic steps (not agents):** Bing Search (5) — a **tool/connector**, not an LLM call;
-  Pre-filter (6); Fetch & Clean (7); Loop Controller (10); Verdict Routing (11). *(So "an agent does
-  the Bing search" is the one to adjust — Bing is a tool the workflow invokes, gated to the allowlist.)*
+- **Foundry agent (1):** Query Synthesis (4) is a **Foundry agent** (a hosted agent defined in the
+  Foundry project) configured with the **Grounding with Bing Custom Search** tool. MAF **references**
+  this agent; the agent **performs the grounded, allowlist-scoped web search itself** via its tool, so
+  there is **no separate Bing Search node** to invoke — search is folded into query synthesis.
+- **MAF agents over a Foundry model deployment (4):** Relevance Eval (9), Enrichment (12),
+  Categorize (13), Summarize & Impact (14) are plain **MAF agents** that only **reference a Foundry
+  project + model deployment** (a chat client) — no hosted agent, no tools.
+- **Deterministic steps (not agents):** Pre-filter (6); Fetch & Clean (7); Loop Controller (10);
+  Verdict Routing (11). *(Bing Search is no longer a standalone step — it is the Query Synthesis
+  Foundry agent's Grounding with Bing Custom Search tool.)*
 
 #### The agent roster (build each as a stub in this phase, fill in later)
 
 | # | Agent (LLM) | Role in the workflow | Input ? Output (contract) | Real impl. phase |
 |---|-------------|----------------------|---------------------------|------------------|
-| 4 | **Query Synthesis Agent** | Turn the topic-group keyword/synonym OR-list into focused search quer(ies); on re-loops read `SearchHistory` to rotate synonyms / fill gaps. Decides *how many* queries. | `TopicGroupContext` + `SearchHistory` ? `string[] queries` | **3** |
+| 4 | **Query Synthesis Agent** *(Foundry agent — Grounding with Bing Custom Search tool)* | Turn the topic-group keyword/synonym OR-list into focused search quer(ies) **and run the grounded, allowlist-scoped search via its Bing Custom Search tool**; on re-loops read `SearchHistory` to rotate synonyms / fill gaps. Decides *how many* queries. | `TopicGroupContext` + `SearchHistory` ? `string[] queries` + grounded allowlisted hits/citations | **3** |
 | 9 | **Relevance Eval Agent** | Single full-text call ? `RELEVANT/BORDERLINE/NOT_RELEVANT`; effective-date aware; applies retrieved learnings; judges goal coverage. | cleaned full text + dates + `SearchHistory` ? `Verdict` + date fields + rationale | **6** |
 | 12 | **Enrichment Agent** | Post-verdict enrichment only (relevance already decided): `whatItDoes` summary + metadata. | carried `ResultItem` ? enriched `ResultItem` | **7** |
 | 13 | **Categorize Agent** | Assign impact area, regulator, and **approved tags only** (controlled vocabulary). | enriched `ResultItem` ? category fields | **7** |
 | 14 | **Summarize & Impact Agent** | RAG over in-memory history ? plain-English impact summary + effective-date framing. | enriched `ResultItem` + `SearchHistory` ? summary/impact | **7** |
 
 > The two controller nodes — **Loop Controller (10)** and **Verdict Routing (11)** — are deterministic
-> orchestration owned by **L1**, not agents. Bing Search (5) is registered as a **tool/connector** so
-> a later option is to let the Query Synthesis agent call it as a function; for the POC the workflow
-> invokes it deterministically right after synthesis.
+> orchestration owned by **L1**, not agents. **Bing Search (5) is not a separate node:** the Query
+> Synthesis **Foundry agent** carries the **Grounding with Bing Custom Search** tool and returns
+> grounded, allowlist-scoped hits directly, which flow straight into the deterministic pre-filter (6).
 
 **Tasks — workflow & orchestration (L1)**
 - [ ] Add `AgenticRagScanner.Workflows`; define **one MAF workflow per topic group**, with MAF
   **Cosmos checkpointing** wired to the shared Azure Cosmos account (see Phase 8) so long runs are durable/resumable.
 - [ ] Build the loop scaffold threading `SearchHistory` through each pass:
-  `QuerySynthesis ? BingSearch(tool) ? Pre-filter ? Fetch&Clean ? RelevanceEval ? LoopController ?`
+  `QuerySynthesis (Foundry agent, Grounding with Bing Custom Search tool) ? Pre-filter ? Fetch&Clean ? RelevanceEval ? LoopController ?`
   `VerdictRouting ? Enrichment ? Categorize ? Summarize&Impact`.
 - [ ] **Loop Controller** stub (deterministic): honor per-group `maxLoops` (default 3); append each pass to `SearchHistory`.
 - [ ] **Verdict Routing** stub (deterministic): RELEVANT/BORDERLINE ? enrichment; NOT_RELEVANT ? dropped + logged.
-- [ ] Register **Bing Search as a tool/connector** (allowlist-gated) — stubbed to return canned hits.
+- [ ] Stub the **Query Synthesis Foundry agent's Grounding with Bing Custom Search tool** (allowlist-scoped) — returns canned grounded hits (there is **no separate Bing Search node**).
 
 **Tasks — agent stubs (L2)** *(one PR per agent — naturally parallel across the team)*
-- [ ] **Query Synthesis Agent** stub — returns 1–2 canned queries from the keyword set.
+- [ ] **Query Synthesis Agent** stub (**Foundry agent** w/ Grounding with Bing Custom Search tool) — returns 1–2 canned queries + canned grounded hits.
 - [ ] **Relevance Eval Agent** stub — returns a canned `Verdict` + date fields per item.
 - [ ] **Enrichment Agent** stub — returns a canned `whatItDoes` + metadata.
 - [ ] **Categorize Agent** stub — returns canned impact area / regulator / approved tags.
 - [ ] **Summarize & Impact Agent** stub — returns a canned plain-English summary.
-- [ ] For each stub: define its MAF agent definition (name, instructions placeholder, I/O type),
-  register it in DI, and add a `Prompts/<Agent>Prompt.cs` placeholder (see prompt-management standard).
+- [ ] For each stub: define its agent (the four downstream stubs are **MAF agents over a Foundry
+  model deployment**; **Query Synthesis is a Foundry agent** with the Grounding with Bing Custom Search
+  tool) — name, instructions placeholder, I/O type — register it in DI, and add a
+  `Prompts/<Agent>Prompt.cs` placeholder (see prompt-management standard).
 
 **DoD / demo:** a run executes the **entire loop end-to-end with fake data**, loops up to `maxLoops`,
 routes verdicts, emits stub `ResultItem`s, and **checkpoints to Cosmos**. No external LLM/Bing calls yet.
@@ -252,36 +259,47 @@ routes verdicts, emits stub `ResultItem`s, and **checkpoints to Cosmos**. No ext
 
 ---
 
-### Phase 3 — Foundry LLM service + Query Synthesis Agent (first real agent) · *L2-led*
-**Goal:** make LLM calls real; implement the first agent. `? arch step 4`
+### Phase 3 — Foundry LLM service + Query Synthesis Foundry agent (first real agent) · *L2-led*
+**Goal:** make LLM calls real; stand up the **Query Synthesis Foundry agent** (Grounding with Bing Custom Search) as the first real agent, and the **Foundry model deployment** the other agents reuse. `? arch step 4 (+ step 5 via the agent's grounding tool)`
 
 **Tasks**
-- [ ] **(L2)** Implement `IFoundryService` against Microsoft Foundry using `DefaultAzureCredential`
-  (prefer an `IChatClient` abstraction via `Microsoft.Extensions.AI`); add resilience + throttle.
+- [ ] **(L2)** Implement `IFoundryService` against a **Microsoft Foundry project + model deployment**
+  using `DefaultAzureCredential` (prefer an `IChatClient` abstraction via `Microsoft.Extensions.AI`);
+  add resilience + throttle. **This is the chat client the four MAF agents reference** (Relevance Eval,
+  Enrichment, Categorize, Summarize & Impact) — they need only the project + deployment, no hosted agent.
 - [ ] **(L2)** Prompt management: externalized, versioned prompt templates.
-- [ ] **(L2)** **Query Synthesis Agent** (real): synthesize focused queries from the keyword set;
-  on re-loops consult `SearchHistory` to **rotate synonym coverage** and avoid redundancy (primer §2/§3).
+- [ ] **(L2)** **Query Synthesis Agent** (real) — implement as a **Foundry agent** (defined in the
+  Foundry project) configured with the **Grounding with Bing Custom Search** tool and **referenced by
+  the MAF workflow**: synthesize focused queries from the keyword set **and run the grounded,
+  allowlist-scoped search via its tool** (returns hits/citations); on re-loops consult `SearchHistory`
+  to **rotate synonym coverage** and avoid redundancy (primer §2/§3).
 - [ ] **(L2)** Structured output + validation; bounded retry on invalid JSON.
 - [ ] **(L3)** Token-usage + latency metrics for the agent.
 
-**DoD / demo:** real, non-redundant queries generated from a topic group; second loop targets
-untested synonyms/gaps.
+**DoD / demo:** real, non-redundant queries generated from a topic group, **each returning grounded
+allowlisted hits/citations via the agent's Bing Custom Search tool**; second loop targets untested
+synonyms/gaps.
 
 ---
 
-### Phase 4 — Bing grounding search + deterministic pre-filter · *L2 + L1/L3*
-**Goal:** real grounded search restricted to the allowlist, then deterministic pre-filter.
-`? arch steps 5–6`
+### Phase 4 — Bing Custom Search grounding (allowlist) + deterministic pre-filter · *L2 + L1/L3*
+**Goal:** configure the **Grounding with Bing Custom Search** instance (primary-source allowlist) that
+the **Query Synthesis Foundry agent** (Phase 3) calls, then add the deterministic pre-filter.
+`? arch steps 5–6` *(step 5 is now the Foundry agent's grounding tool, not a standalone Bing service)*
 
 **Tasks**
-- [ ] **(L2)** Implement `IBingSearchGroundingService` (Grounding with Bing Search) **gated to the
-  primary-source allowlist at query time** (primer §2).
-- [ ] **(L2)** Implement `IBingCustomSearchGroundingService` (custom-scoped config) — parity.
+- [ ] **(L2)** Configure the **Grounding with Bing Custom Search** resource/connection used by the
+  Query Synthesis Foundry agent: scope the custom-search instance to the **primary-source allowlist**
+  so grounding is allowlist-restricted (primer §2). *(Supersedes the standalone
+  `IBingSearchGroundingService` / `IBingCustomSearchGroundingService` — grounding is owned by the
+  Foundry agent's tool.)*
+- [ ] **(L2)** Verify the agent returns grounded hits/citations restricted to allowlisted domains;
+  tune the tool's result count / configuration.
 - [ ] **(L1/L3)** **Deterministic pre-filter:** dedupe (incl. **cross-group**), URL
   reachability/validity. Pure functions, fully unit-tested.
 
-**DoD / demo:** loop fetches real results restricted to allowlisted domains; duplicates (including
-across groups) removed; dead URLs dropped.
+**DoD / demo:** the Query Synthesis Foundry agent returns real results restricted to allowlisted
+domains via its Bing Custom Search tool; duplicates (including across groups) removed; dead URLs dropped.
 
 ---
 
