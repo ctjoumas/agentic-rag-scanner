@@ -2,6 +2,8 @@ using AgenticRagScannerApi.Configuration;
 using AgenticRagScannerApi.Core.Throttling;
 using AgenticRagScannerApi.Filters;
 using AgenticRagScannerApi.Mappers;
+using AgenticRagScannerApi.Orchestration;
+using AgenticRagScannerApi.Serialization;
 using AgenticRagScannerApi.Services;
 using AgenticRagScannerApi.Validators;
 using Azure;
@@ -23,6 +25,7 @@ public static class ServiceCollectionExtensions
             .AddConfiguredOptions(configuration)
             .AddAzureSdkClients()
             .AddCoreServices()
+            .AddOrchestrationServices()
             .AddValidationServices()
             .AddApiFrameworkServices();
     }
@@ -86,6 +89,17 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    public static IServiceCollection AddOrchestrationServices(this IServiceCollection services)
+    {
+        // Run lifecycle (Epic 1) — synchronous, sequential scan orchestration.
+        // Scoped: per-request coordination; the per-group executor is a Phase 1 stub that
+        // Epic 2 replaces with the real MAF workflow.
+        services.AddScoped<IScanOrchestrator, ScanOrchestrator>();
+        services.AddScoped<ITopicGroupExecutor, StubTopicGroupExecutor>();
+
+        return services;
+    }
+
     public static IServiceCollection AddValidationServices(this IServiceCollection services)
     {
 
@@ -102,7 +116,12 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddApiFrameworkServices(this IServiceCollection services)
     {
         // Add services to the container.
-        services.AddControllers(options => options.Filters.Add<ApiExceptionFilterAttribute>());
+        services.AddControllers(options => options.Filters.Add<ApiExceptionFilterAttribute>())
+            .AddJsonOptions(options =>
+            {
+                // Accept "yyyy-MM-dd" and tolerate full ISO date-times for DateOnly fields.
+                options.JsonSerializerOptions.Converters.Add(new DateOnlyJsonConverter());
+            });
         // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
         services.AddOpenApi();
 

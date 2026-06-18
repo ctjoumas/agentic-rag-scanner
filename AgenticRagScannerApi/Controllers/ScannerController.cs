@@ -1,57 +1,42 @@
+using AgenticRagScannerApi.Core.Runtime;
 using AgenticRagScannerApi.Models;
-using AgenticRagScannerApi.Services;
-using AgenticRagScannerApi.Mappers;
+using AgenticRagScannerApi.Orchestration;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AgenticRagScannerApi.Controllers;
 
 /// <summary>
-/// Entry point for triggering a horizon scan. For the sprint this is a manual
-/// trigger; the orchestration of per-topic-group workflows is implemented later.
+/// Entry point for triggering a horizon scan. The request is validated, then run synchronously:
+/// each selected topic group is scanned sequentially and the aggregated results are returned in
+/// the response (no run-status polling for the POC).
 /// </summary>
 [ApiController]
 [Route("api/v1/[controller]")]
 public class ScannerController : ControllerBase
 {
-    private readonly IFoundryService _foundryService;
-    private readonly IAzureSearchService _searchService;
-    private readonly IAzureStorageService _storageService;
-    private readonly IBingSearchGroundingService _bingSearchGroundingService;
-    private readonly IBingCustomSearchGroundingService _bingCustomSearchGroundingService;
-    private readonly IScanMapper _scanMapper;
+    private readonly IScanOrchestrator _scanOrchestrator;
     private readonly IValidator<ScanRequest> _scanRequestValidator;
     private readonly ILogger<ScannerController> _logger;
 
     public ScannerController(
-        IFoundryService foundryService,
-        IAzureSearchService searchService,
-        IAzureStorageService storageService,
-        IBingSearchGroundingService bingSearchGroundingService,
-        IBingCustomSearchGroundingService bingCustomSearchGroundingService,
-        IScanMapper scanMapper,
+        IScanOrchestrator scanOrchestrator,
         IValidator<ScanRequest> scanRequestValidator,
         ILogger<ScannerController> logger)
     {
-        _foundryService = foundryService;
-        _searchService = searchService;
-        _storageService = storageService;
-        _bingSearchGroundingService = bingSearchGroundingService;
-        _bingCustomSearchGroundingService = bingCustomSearchGroundingService;
-        _scanMapper = scanMapper;
+        _scanOrchestrator = scanOrchestrator;
         _scanRequestValidator = scanRequestValidator;
         _logger = logger;
     }
 
     /// <summary>
-    /// Manually triggers a horizon scan for the supplied date + jurisdiction +
-    /// topic groups. For this sprint the request is validated and acknowledged
-    /// with a run id; the per-topic-group MAF workflow orchestration is implemented later.
+    /// Manually triggers a horizon scan for the supplied date + jurisdiction + topic groups.
+    /// The scan runs synchronously and returns the aggregated per-topic-group results (200).
     /// </summary>
     [HttpPost("scan")]
-    [ProducesResponseType(typeof(ScanResponse), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ScanResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public IActionResult Scan([FromBody] ScanRequest request)
+    public async Task<IActionResult> Scan([FromBody] ScanRequest request, CancellationToken cancellationToken)
     {
         var validationResult = _scanRequestValidator.Validate(request);
         if (!validationResult.IsValid)
@@ -59,16 +44,12 @@ public class ScannerController : ControllerBase
             throw new ValidationException(validationResult.Errors);
         }
 
-        var runId = Guid.NewGuid().ToString("N");
-
         _logger.LogInformation(
-            "Accepted scan run {RunId}: jurisdiction={Jurisdiction}, asOfDate={AsOfDate}, topicGroups={TopicGroupCount}",
-            runId, request.Jurisdiction, request.AsOfDate, request.TopicGroups.Count);
+            "Scan requested: jurisdiction={Jurisdiction}, asOfDate={AsOfDate}, topicGroups={TopicGroupCount}",
+            request.Jurisdiction, request.AsOfDate, request.TopicGroups.Count);
 
-        // TODO: fan out one MAF workflow per topic group under a shared throttle
-        // (architecture-context.md §3). Deferred per §5.
-        var response = _scanMapper.ToResponse(request, runId, DateTimeOffset.UtcNow);
+        var result = await _scanOrchestrator.RunAsync(request, cancellationToken);
 
-        return AcceptedAtAction(nameof(Scan), new { runId }, response);
+        return Ok(result);
     }
 }
