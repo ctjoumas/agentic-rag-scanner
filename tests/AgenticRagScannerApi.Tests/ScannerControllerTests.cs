@@ -1,7 +1,7 @@
 using AgenticRagScannerApi.Controllers;
-using AgenticRagScannerApi.Mappers;
+using AgenticRagScannerApi.Core.Runtime;
 using AgenticRagScannerApi.Models;
-using AgenticRagScannerApi.Services;
+using AgenticRagScannerApi.Orchestration;
 using FluentValidation;
 using FluentValidation.Results;
 using FluentAssertions;
@@ -14,7 +14,7 @@ namespace AgenticRagScannerApi.Tests;
 public class ScannerControllerTests
 {
     [Fact]
-    public void Scan_WhenCustomValidatorFails_ThrowsValidationException()
+    public async Task Scan_WhenCustomValidatorFails_ThrowsValidationException()
     {
         var validator = new Mock<IValidator<ScanRequest>>();
         validator
@@ -32,16 +32,15 @@ public class ScannerControllerTests
             TopicGroups = ["Tax"],
         };
 
-        var act = () => controller.Scan(request);
+        var act = () => controller.Scan(request, CancellationToken.None);
 
-        var exception = act.Should().Throw<ValidationException>().Which;
+        var exception = (await act.Should().ThrowAsync<ValidationException>()).Which;
         exception.Errors.Should().Contain(e => e.PropertyName == nameof(ScanRequest.Jurisdiction));
     }
 
     [Fact]
-    public void Scan_WhenRequestIsValid_ReturnsAcceptedWithRunMetadata()
+    public async Task Scan_WhenRequestIsValid_ReturnsOkWithAggregatedResults()
     {
-        var controller = CreateController();
         var request = new ScanRequest
         {
             AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
@@ -49,39 +48,50 @@ public class ScannerControllerTests
             TopicGroups = ["Tax", "Conduct"],
         };
 
-        var result = controller.Scan(request);
+        var expected = new ScanResult
+        {
+            RunId = "abc123",
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            CompletedAtUtc = DateTimeOffset.UtcNow,
+            Groups =
+            [
+                new TopicGroupResult { GroupId = "tax", GroupName = "Tax", Status = "Completed" },
+                new TopicGroupResult { GroupId = "conduct", GroupName = "Conduct", Status = "Completed" },
+            ],
+        };
 
-        var accepted = result.Should().BeOfType<AcceptedAtActionResult>().Subject;
-        accepted.ActionName.Should().Be(nameof(ScannerController.Scan));
-        accepted.RouteValues.Should().ContainKey("runId");
+        var orchestrator = new Mock<IScanOrchestrator>();
+        orchestrator
+            .Setup(o => o.RunAsync(request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expected);
 
-        var response = accepted.Value.Should().BeOfType<ScanResponse>().Subject;
-        response.Status.Should().Be("Accepted");
-        response.RunId.Should().MatchRegex("^[a-f0-9]{32}$");
-        response.TopicGroups.Should().BeEquivalentTo(request.TopicGroups);
-        response.AcceptedAtUtc.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
+        var controller = CreateController(orchestrator.Object);
+
+        var result = await controller.Scan(request, CancellationToken.None);
+
+        var ok = result.Should().BeOfType<OkObjectResult>().Subject;
+        ok.StatusCode.Should().Be(200);
+        ok.Value.Should().BeSameAs(expected);
+        orchestrator.Verify(o => o.RunAsync(request, It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    private static ScannerController CreateController()
+    private static ScannerController CreateController(IValidator<ScanRequest> validator) =>
+        CreateController(validator, Mock.Of<IScanOrchestrator>());
+
+    private static ScannerController CreateController(IScanOrchestrator orchestrator) =>
+        CreateController(CreatePassingValidator(), orchestrator);
+
+    private static ScannerController CreateController(
+        IValidator<ScanRequest> validator,
+        IScanOrchestrator orchestrator) =>
+        new(orchestrator, validator, Mock.Of<ILogger<ScannerController>>());
+
+    private static IValidator<ScanRequest> CreatePassingValidator()
     {
         var validator = new Mock<IValidator<ScanRequest>>();
         validator
             .Setup(v => v.Validate(It.IsAny<ScanRequest>()))
             .Returns(new ValidationResult());
-
-        return CreateController(validator.Object);
-    }
-
-    private static ScannerController CreateController(IValidator<ScanRequest> scanRequestValidator)
-    {
-        return new ScannerController(
-            Mock.Of<IFoundryService>(),
-            Mock.Of<IAzureSearchService>(),
-            Mock.Of<IAzureStorageService>(),
-            Mock.Of<IBingSearchGroundingService>(),
-            Mock.Of<IBingCustomSearchGroundingService>(),
-            new ScanMapper(),
-            scanRequestValidator,
-            Mock.Of<ILogger<ScannerController>>());
+        return validator.Object;
     }
 }
