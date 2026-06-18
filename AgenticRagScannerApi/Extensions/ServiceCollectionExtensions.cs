@@ -4,9 +4,13 @@ using AgenticRagScannerApi.Filters;
 using AgenticRagScannerApi.Mappers;
 using AgenticRagScannerApi.Services;
 using AgenticRagScannerApi.Validators;
+using Azure;
 using Azure.Core;
 using Azure.Identity;
+using Azure.Search.Documents;
+using Azure.Storage.Blobs;
 using FluentValidation;
+using Microsoft.Extensions.Options;
 using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
 
 namespace AgenticRagScannerApi.Extensions;
@@ -17,6 +21,7 @@ public static class ServiceCollectionExtensions
     {
         return services
             .AddConfiguredOptions(configuration)
+            .AddAzureSdkClients()
             .AddCoreServices()
             .AddValidationServices()
             .AddApiFrameworkServices();
@@ -34,9 +39,35 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    public static IServiceCollection AddAzureSdkClients(this IServiceCollection services)
+    {
+        // Azure SDK clients — registered as singletons (thread-safe, long-lived) and
+        // injected into the service layer. Prefer the shared TokenCredential (keyless);
+        // a connection string / API key is honored for local development only.
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<AzureStorageOptions>>().Value;
+
+            return string.IsNullOrWhiteSpace(options.ConnectionString)
+                ? new BlobServiceClient(new Uri(options.BlobServiceUri), sp.GetRequiredService<TokenCredential>())
+                : new BlobServiceClient(options.ConnectionString);
+        });
+
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<AzureSearchOptions>>().Value;
+            var endpoint = new Uri(options.Endpoint);
+
+            return string.IsNullOrWhiteSpace(options.ApiKey)
+                ? new SearchClient(endpoint, options.IndexName, sp.GetRequiredService<TokenCredential>())
+                : new SearchClient(endpoint, options.IndexName, new AzureKeyCredential(options.ApiKey));
+        });
+
+        return services;
+    }
+
     public static IServiceCollection AddCoreServices(this IServiceCollection services)
     {
-
         // Service layer — one registration per external service.
         // Singleton: these wrap thread-safe Azure SDK clients meant to be long-lived.
         services.AddSingleton<IAzureStorageService, AzureStorageService>();
@@ -70,7 +101,6 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddApiFrameworkServices(this IServiceCollection services)
     {
-
         // Add services to the container.
         services.AddControllers(options => options.Filters.Add<ApiExceptionFilterAttribute>());
         // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
