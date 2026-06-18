@@ -6,12 +6,19 @@ using AgenticRagScannerApi.Orchestration;
 using AgenticRagScannerApi.Serialization;
 using AgenticRagScannerApi.Services;
 using AgenticRagScannerApi.Validators;
+using AgenticRagScannerApi.Workflows.Agents;
+using AgenticRagScannerApi.Workflows.Checkpointing;
+using AgenticRagScannerApi.Workflows.Configuration;
+using AgenticRagScannerApi.Workflows.Pipeline;
+using AgenticRagScannerApi.Workflows.Steps;
+using AgenticRagScannerApi.Workflows.Tools;
 using Azure;
 using Azure.Core;
 using Azure.Identity;
 using Azure.Search.Documents;
 using Azure.Storage.Blobs;
 using FluentValidation;
+using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Options;
 using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
 
@@ -25,6 +32,7 @@ public static class ServiceCollectionExtensions
             .AddConfiguredOptions(configuration)
             .AddAzureSdkClients()
             .AddCoreServices()
+            .AddWorkflowServices()
             .AddOrchestrationServices()
             .AddValidationServices()
             .AddApiFrameworkServices();
@@ -38,6 +46,7 @@ public static class ServiceCollectionExtensions
         services.AddOptions<FoundryOptions>().Bind(configuration.GetSection(FoundryOptions.SectionName)).ValidateDataAnnotations();
         services.AddOptions<BingSearchGroundingOptions>().Bind(configuration.GetSection(BingSearchGroundingOptions.SectionName)).ValidateDataAnnotations();
         services.AddOptions<BingCustomSearchGroundingOptions>().Bind(configuration.GetSection(BingCustomSearchGroundingOptions.SectionName)).ValidateDataAnnotations();
+        services.AddOptions<CosmosOptions>().Bind(configuration.GetSection(CosmosOptions.SectionName)).ValidateDataAnnotations();
 
         return services;
     }
@@ -66,6 +75,15 @@ public static class ServiceCollectionExtensions
                 : new SearchClient(endpoint, options.IndexName, new AzureKeyCredential(options.ApiKey));
         });
 
+        // Cosmos DB client — keyless (DefaultAzureCredential); backs MAF workflow checkpointing
+        // (Epic 2) and the result store (Epic 8).
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<CosmosOptions>>().Value;
+
+            return new CosmosClient(options.Endpoint, sp.GetRequiredService<TokenCredential>());
+        });
+
         return services;
     }
 
@@ -91,11 +109,35 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddOrchestrationServices(this IServiceCollection services)
     {
-        // Run lifecycle (Epic 1) — synchronous, sequential scan orchestration.
-        // Scoped: per-request coordination; the per-group executor is a Phase 1 stub that
-        // Epic 2 replaces with the real MAF workflow.
+        // Run lifecycle — synchronous, sequential scan orchestration.
+        // Scoped: per-request coordination; the per-group executor now runs the per-group MAF
+        // workflow (Epic 2), replacing the Phase 1 stub.
         services.AddScoped<IScanOrchestrator, ScanOrchestrator>();
-        services.AddScoped<ITopicGroupExecutor, StubTopicGroupExecutor>();
+        services.AddScoped<ITopicGroupExecutor, WorkflowTopicGroupExecutor>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddWorkflowServices(this IServiceCollection services)
+    {
+        // MAF workflow scaffolding (Epic 2). Agents are stubs (no LLM calls yet); the real
+        // Foundry-backed implementations arrive in Epics 3/6/7.
+        services.AddSingleton<IQuerySynthesisAgent, QuerySynthesisAgentStub>();
+        services.AddSingleton<IRelevanceEvalAgent, RelevanceEvalAgentStub>();
+        services.AddSingleton<IEnrichmentAgent, EnrichmentAgentStub>();
+        services.AddSingleton<ICategorizeAgent, CategorizeAgentStub>();
+        services.AddSingleton<ISummarizeImpactAgent, SummarizeImpactAgentStub>();
+
+        // Deterministic steps + the allowlist-gated Bing tool (canned hits in Epic 2).
+        services.AddSingleton<IPreFilterStep, PreFilterStep>();
+        services.AddSingleton<IFetchAndCleanStep, FetchAndCleanStep>();
+        services.AddSingleton<ILoopController, LoopController>();
+        services.AddSingleton<IVerdictRouting, VerdictRouting>();
+        services.AddSingleton<IBingSearchTool, BingSearchTool>();
+
+        // Loop composition + the MAF Cosmos checkpoint store.
+        services.AddSingleton<TopicGroupPipeline>();
+        services.AddSingleton<CosmosCheckpointStore>();
 
         return services;
     }
