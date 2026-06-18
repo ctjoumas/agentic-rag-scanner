@@ -76,24 +76,34 @@ public sealed class WorkflowTopicGroupExecutor : ITopicGroupExecutor
 
         TopicGroupResult? result = null;
 
-        await foreach (var workflowEvent in run.WatchStreamAsync().WithCancellation(cancellationToken).ConfigureAwait(false))
+        try
         {
-            switch (workflowEvent)
+            await foreach (var workflowEvent in run.WatchStreamAsync().WithCancellation(cancellationToken).ConfigureAwait(false))
             {
-                case WorkflowOutputEvent output when output.Data is TopicGroupResult topicGroupResult:
-                    result = topicGroupResult;
-                    break;
+                switch (workflowEvent)
+                {
+                    case WorkflowOutputEvent output when output.Data is TopicGroupResult topicGroupResult:
+                        result = topicGroupResult;
+                        break;
 
-                case SuperStepCompletedEvent superStep when superStep.CompletionInfo?.Checkpoint is { } checkpoint:
-                    _logger.LogDebug(
-                        "Checkpoint persisted for group '{GroupId}': {CheckpointId}.",
-                        context.TopicGroup.Id, checkpoint.CheckpointId);
-                    break;
+                    case SuperStepCompletedEvent superStep when superStep.CompletionInfo?.Checkpoint is { } checkpoint:
+                        _logger.LogDebug(
+                            "Checkpoint persisted for group '{GroupId}': {CheckpointId}.",
+                            context.TopicGroup.Id, checkpoint.CheckpointId);
+                        break;
 
-                case WorkflowErrorEvent error:
-                    _logger.LogError(error.Exception, "Topic group '{GroupId}' workflow error.", context.TopicGroup.Id);
-                    break;
+                    case WorkflowErrorEvent error:
+                        _logger.LogError(error.Exception, "Topic group '{GroupId}' workflow error.", context.TopicGroup.Id);
+                        break;
+                }
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cancellation is not a failure: checkpoints persisted so far remain valid, so the run can be
+            // resumed later. Surface it as cancellation rather than the "no result" error below.
+            _logger.LogInformation("Topic group '{GroupId}' workflow canceled; checkpoints preserved for resume.", context.TopicGroup.Id);
+            throw;
         }
 
         return result ?? throw new InvalidOperationException(
