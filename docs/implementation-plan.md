@@ -267,17 +267,19 @@ routes verdicts, emits stub `ResultItem`s, and **checkpoints to Cosmos**. No ext
 **Goal:** make LLM calls real via the **Foundry model deployment**; implement the **Query Synthesis Agent** (a MAF agent that synthesizes query strings) as the first real agent. `? arch step 4`
 
 **Tasks**
-- [ ] **(L2)** Implement `IFoundryService` against a **Microsoft Foundry project + model deployment**
+- [x] **(L2)** Implement `IFoundryService` against a **Microsoft Foundry project + model deployment**
   using `DefaultAzureCredential` (prefer an `IChatClient` abstraction via `Microsoft.Extensions.AI`);
   add resilience + throttle. **This is the chat client the five MAF agents reference** (Query Synthesis,
   Relevance Eval, Enrichment, Categorize, Summarize & Impact) — they need only the project + deployment, no hosted agent.
-- [ ] **(L2)** Prompt management: externalized, versioned prompt templates.
-- [ ] **(L2)** **Query Synthesis Agent** (real) — implement as a **MAF agent over the Foundry model
+  *(Shared `IChatClient` registered in DI, built from `AzureOpenAIClient` + `ResilientChatClient` (Polly retry/timeout + shared throttle + token/latency logging) and OpenTelemetry; `FoundryService` now delegates to it.)*
+- [x] **(L2)** Prompt management: externalized, versioned prompt templates. *(`QuerySynthesisPrompt` v1 + `docs/prompt-management.md`.)*
+- [x] **(L2)** **Query Synthesis Agent** (real) — implement as a **MAF agent over the Foundry model
   deployment** (the `IChatClient` above): synthesize focused **query strings** from the topic-group
   keyword set; on re-loops consult `SearchHistory` to **rotate synonym coverage** and avoid redundancy
   (primer §2/§3). It returns queries only — the Web Search Foundry agent (Phase 4) runs Bing.
-- [ ] **(L2)** Structured output + validation; bounded retry on invalid JSON.
-- [ ] **(L3)** Token-usage + latency metrics for the agent.
+  *(`QuerySynthesisAgent` over a MAF `ChatClientAgent`.)*
+- [x] **(L2)** Structured output + validation; bounded retry on invalid JSON. *(JSON response format, tolerant parse + dedupe/cap, bounded retry, deterministic fallback.)*
+- [x] **(L3)** Token-usage + latency metrics for the agent. *(Per-call token/latency logged in `ResilientChatClient`; OpenTelemetry GenAI instrumentation wired for export in Phase 11.)*
 
 **DoD / demo:** real, non-redundant **queries** generated from a topic group's keywords; second loop
 targets untested synonyms/gaps. (Grounded hits arrive once the Web Search Foundry agent is real in Phase 4.)

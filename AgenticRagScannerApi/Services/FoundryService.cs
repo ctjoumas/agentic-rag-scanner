@@ -1,23 +1,24 @@
-using AgenticRagScannerApi.Configuration;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.AI;
 
 namespace AgenticRagScannerApi.Services;
 
 /// <inheritdoc />
 public class FoundryService : IFoundryService
 {
-    private readonly FoundryOptions _options;
+    private readonly IChatClient _chatClient;
     private readonly ILogger<FoundryService> _logger;
 
-    public FoundryService(IOptions<FoundryOptions> options, ILogger<FoundryService> logger)
+    public FoundryService(IChatClient chatClient, ILogger<FoundryService> logger)
     {
-        _options = options.Value;
+        _chatClient = chatClient;
         _logger = logger;
     }
 
-    public Task<string> GetCompletionAsync(string prompt, CancellationToken cancellationToken = default)
+    public async Task<string> GetCompletionAsync(string prompt, CancellationToken cancellationToken = default)
     {
-        // TODO: implement against Microsoft Foundry (prefer DefaultAzureCredential).
-        throw new NotImplementedException();
+        _logger.LogDebug("Foundry completion requested ({PromptLength} chars).", prompt.Length);
+
+        var response = await _chatClient.GetResponseAsync(prompt, cancellationToken: cancellationToken);
+        return response.Text;
     }
 }

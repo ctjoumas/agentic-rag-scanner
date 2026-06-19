@@ -143,7 +143,7 @@ LoopController -> VerdictRouting -> Enrichment -> Categorize -> Summarize&Impact
 
 ---
 
-## Epic 3 — Foundry model deployment + Query Synthesis Agent (first real agent) · `phase-3` · *L2-led*
+## ✅ Epic 3 — Foundry model deployment + Query Synthesis Agent (first real agent) · `phase-3` · *L2-led* · **Complete**
 
 ### 3.1 — Implement `IFoundryService` (Foundry project + model deployment) · `lane:L2-agents`
 **AC:** calls a **Microsoft Foundry project + model deployment** via `DefaultAzureCredential` (prefer `IChatClient` /
