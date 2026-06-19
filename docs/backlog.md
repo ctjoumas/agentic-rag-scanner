@@ -96,7 +96,7 @@ text remains (primer §1).
 
 ## ✅ Epic 2 — MAF workflow scaffolding (stub agents) · `phase-2` · *L1 + L2* · **Complete**
 > All agents + steps present but **stubbed**. **Sync point:** agent I/O contracts frozen here.
-> **Agent hosting:** Query Synthesis is a **Foundry agent** (Grounding with Bing Custom Search tool) the MAF workflow **references**; the other four (Eval, Enrichment, Categorize, Summarize) are **MAF agents over a Foundry model deployment**. Bing is **not a separate step** — it is the Query Synthesis agent's grounding tool.
+> **Agent hosting:** Query Synthesis and the four downstream agents (Eval, Enrichment, Categorize, Summarize) are **MAF agents over a Foundry model deployment**; the **Web Search agent** is the solution's single **Foundry agent** (Grounding with Bing Custom Search tool) the MAF workflow **references** — it **executes the queries** synthesized by the Query Synthesis MAF agent.
 
 ### 2.1 — `AgenticRagScanner.Workflows` + one MAF workflow per group + Cosmos checkpointing · `lane:L1-orchestration`
 **AC:** Workflows project added; one MAF workflow per topic group; **MAF Cosmos checkpointing** wired to
@@ -104,7 +104,7 @@ the shared dev Cosmos account (`checkpoints` container); a run is resumable from
 `labels: user-story, area:maf, area:cosmos` · **depends on:** 1.1 · `needs-design` (confirm MAF checkpoint API).
 
 ### 2.2 — Loop scaffold threading `SearchHistory` · `lane:L1-orchestration`
-**AC:** ordered loop wired: QuerySynthesis (Foundry agent w/ Grounding with Bing Custom Search tool) -> Pre-filter -> Fetch&Clean -> RelevanceEval ->
+**AC:** ordered loop wired: QuerySynthesis (MAF agent) -> WebSearch (Foundry agent w/ Grounding with Bing Custom Search) -> Pre-filter -> Fetch&Clean -> RelevanceEval ->
 LoopController -> VerdictRouting -> Enrichment -> Categorize -> Summarize&Impact; `SearchHistory` passed each pass.
 `labels: user-story, area:maf` · **depends on:** 2.1.
 
@@ -114,13 +114,13 @@ LoopController -> VerdictRouting -> Enrichment -> Categorize -> Summarize&Impact
 - Verdict Routing stub: RELEVANT/BORDERLINE -> enrichment; NOT_RELEVANT -> dropped + logged for audit.
 `labels: user-story` · **depends on:** 2.2 · *(merged: former 2.3 + 2.4)*
 
-### 2.4 — Stub the Query Synthesis Foundry agent's Grounding with Bing Custom Search tool · `lane:L2-agents`
-**AC:** the Query Synthesis **Foundry agent** carries a **Grounding with Bing Custom Search** tool (not a separate LLM agent or standalone service); returns canned grounded hits; allowlist hook present. **No separate Bing Search node.**
+### 2.4 — Stub the Web Search agent (Foundry agent w/ Grounding with Bing Custom Search tool) · `lane:L2-agents`
+**AC:** the **Web Search agent** is the solution's single **Foundry agent** with a **Grounding with Bing Custom Search** tool that **executes the synthesized queries** from the Query Synthesis MAF agent; returns canned grounded hits; allowlist hook present. **Distinct node** between Query Synthesis and Pre-filter.
 `labels: user-story, area:bing` · **depends on:** 2.2.
 
-### 2.5 — Stub: Query Synthesis Agent (Foundry agent) · `lane:L2-agents`
-**AC:** **Foundry agent** definition (referenced by MAF) + **Grounding with Bing Custom Search** tool (stub) + DI + `Prompts/QuerySynthesisPrompt.cs` placeholder; returns 1–2 canned queries + canned grounded hits.
-`labels: user-story, area:llm, area:bing` · **depends on:** 0.3, 2.2.
+### 2.5 — Stub: Query Synthesis Agent (MAF agent) · `lane:L2-agents`
+**AC:** **MAF agent** definition (over the Foundry model deployment) + DI + `Prompts/QuerySynthesisPrompt.cs` placeholder; returns 1–2 canned **queries** (no Bing call).
+`labels: user-story, area:llm` · **depends on:** 0.3, 2.2.
 
 ### 2.6 — Stub: Relevance Eval Agent · `lane:L2-agents`
 **AC:** returns canned `Verdict` + date fields; **MAF agent def (over a Foundry model deployment)** + DI + prompt placeholder.
@@ -143,40 +143,40 @@ LoopController -> VerdictRouting -> Enrichment -> Categorize -> Summarize&Impact
 
 ---
 
-## Epic 3 — Foundry model deployment + Query Synthesis Foundry agent (first real agent) · `phase-3` · *L2-led*
+## Epic 3 — Foundry model deployment + Query Synthesis Agent (first real agent) · `phase-3` · *L2-led*
 
 ### 3.1 — Implement `IFoundryService` (Foundry project + model deployment) · `lane:L2-agents`
 **AC:** calls a **Microsoft Foundry project + model deployment** via `DefaultAzureCredential` (prefer `IChatClient` /
-`Microsoft.Extensions.AI`); resilience pipeline + shared throttle applied; token/latency metrics. **This is the chat client the four MAF agents (Eval/Enrichment/Categorize/Summarize) reference** — project + deployment only, no hosted agent.
+`Microsoft.Extensions.AI`); resilience pipeline + shared throttle applied; token/latency metrics. **This is the chat client the five MAF agents (Query Synthesis/Eval/Enrichment/Categorize/Summarize) reference** — project + deployment only, no hosted agent.
 `labels: user-story, area:llm` · **depends on:** 2.7 (or 2.6).
 
 ### 3.2 — Prompt management convention (`Prompts/*.cs`) · `lane:L2-agents`
 **AC:** documented pattern; `QuerySynthesisPrompt.cs` builds the system prompt via interpolation; versioned.
 `labels: user-story, area:llm` · **depends on:** 3.1.
 
-### 3.3 — Query Synthesis Agent (real, Foundry agent w/ Grounding with Bing Custom Search) · `lane:L2-agents`
-**AC:** implemented as a **Foundry agent** (in the Foundry project) with the **Grounding with Bing Custom Search** tool, **referenced by MAF**; synthesizes focused queries from the keyword set **and runs the grounded, allowlist-scoped search via its tool** (returns hits/citations); on re-loop reads `SearchHistory` to rotate
-synonyms / avoid redundancy; agent decides query count; structured output + bounded retry on invalid JSON.
-`labels: user-story, area:llm, area:bing` · **depends on:** 3.1, 3.2.
+### 3.3 — Query Synthesis Agent (real, MAF agent) · `lane:L2-agents`
+**AC:** implemented as a **MAF agent** over the Foundry model deployment; synthesizes focused **query strings** from the keyword set; on re-loop reads `SearchHistory` to rotate
+synonyms / avoid redundancy; agent decides query count; structured output + bounded retry on invalid JSON. **Returns queries only — the Web Search agent (Epic 4) runs Bing.**
+`labels: user-story, area:llm` · **depends on:** 3.1, 3.2.
 
-**Epic demo:** real non-redundant queries **with grounded allowlisted hits via the agent's Bing Custom Search tool**; second loop targets untested synonyms/gaps.
+**Epic demo:** real non-redundant queries; second loop targets untested synonyms/gaps. (Grounded hits arrive once the Web Search agent is real in Epic 4.)
 
 ---
 
-## Epic 4 — Bing Custom Search grounding (allowlist) + deterministic pre-filter · `phase-4` · *L2 + L1/L3*
+## Epic 4 — Web Search agent (Foundry, Grounding with Bing Custom Search) + deterministic pre-filter · `phase-4` · *L2 + L1/L3*
 
-### 4.1 — Configure Grounding with Bing Custom Search (allowlist) for the Query Synthesis Foundry agent · `lane:L2-agents`
+### 4.1 — Web Search agent (Foundry agent w/ Grounding with Bing Custom Search), allowlist-scoped · `lane:L2-agents`
 **AC:**
-- Scope the **Grounding with Bing Custom Search** instance to the **primary-source allowlist** so the Query Synthesis Foundry agent's grounding is allowlist-restricted.
-- Verify the agent returns grounded hits/citations limited to allowlisted domains; tune result count / config.
+- Implement the **Web Search agent** as the solution's single **Foundry agent** with the **Grounding with Bing Custom Search** tool, **referenced by MAF**; it **executes the Query Synthesis agent's queries** and returns grounded hits/citations.
+- Scope the **Grounding with Bing Custom Search** instance to the **primary-source allowlist** so grounding is allowlist-restricted; verify hits/citations are limited to allowlisted domains.
 - Supersedes the standalone `IBingSearchGroundingService` / `IBingCustomSearchGroundingService` — grounding is owned by the Foundry agent's tool.
-`labels: user-story, area:bing` · **depends on:** 2.5, 3.3 · *(merged: former 4.1 + 4.2)*
+`labels: user-story, area:bing` · **depends on:** 2.4, 3.3 · *(merged: former 4.1 + 4.2)*
 
 ### 4.3 — Deterministic pre-filter (dedupe incl. cross-group + URL validity) · `lane:L3-data-platform`
 **AC:** pure, unit-tested functions; cross-group dedupe; unreachable/invalid URLs dropped.
 `labels: user-story` · **depends on:** 0.3.
 
-**Epic demo:** the Query Synthesis Foundry agent returns real allowlisted results via its Bing Custom Search tool; duplicates (incl. cross-group) removed; dead URLs dropped.
+**Epic demo:** the Web Search agent executes the synthesized queries and returns real allowlisted results via Grounding with Bing Custom Search; duplicates (incl. cross-group) removed; dead URLs dropped.
 
 ---
 
