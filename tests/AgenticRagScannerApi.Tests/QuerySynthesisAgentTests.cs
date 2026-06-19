@@ -10,34 +10,35 @@ namespace AgenticRagScannerApi.Tests;
 
 /// <summary>
 /// Story 3.3 - the real Query Synthesis MAF agent over a fake <see cref="IChatClient"/> (no network).
-/// Covers JSON parsing, bounded retry on invalid JSON, deterministic fallback, SearchHistory-aware
-/// redundancy avoidance, and de-dupe/cap of the model's queries.
+/// Covers Structured Outputs deserialization, bounded retry when the model output is unusable,
+/// deterministic fallback, and SearchHistory-aware redundancy avoidance. The agent emits a single query
+/// per pass - breadth comes from the agentic loop.
 /// </summary>
 public class QuerySynthesisAgentTests
 {
     [Fact]
-    public async Task SynthesizeAsync_ParsesQueriesFromModelJson()
+    public async Task SynthesizeAsync_ReturnsStructuredQuery()
     {
-        var chat = new FakeChatClient("""{"queries":["uk advisory fuel rates update","HMRC mileage rates change"]}""");
+        var chat = new FakeChatClient("""{"query":"uk advisory fuel rates update"}""");
         var agent = CreateAgent(chat);
         var context = WorkflowTestFactory.CreateContext();
 
-        var queries = await agent.SynthesizeAsync(context);
+        var query = await agent.SynthesizeAsync(context);
 
-        queries.Should().Equal("uk advisory fuel rates update", "HMRC mileage rates change");
+        query.Should().Be("uk advisory fuel rates update");
         chat.CallCount.Should().Be(1);
     }
 
     [Fact]
-    public async Task SynthesizeAsync_RetriesOnInvalidJson_ThenSucceeds()
+    public async Task SynthesizeAsync_RetriesWhenModelOutputUnusable_ThenSucceeds()
     {
-        var chat = new FakeChatClient("not json at all", """{"queries":["recovered query"]}""");
+        var chat = new FakeChatClient("not json at all", """{"query":"recovered query"}""");
         var agent = CreateAgent(chat, new QuerySynthesisOptions { MaxAttempts = 2 });
         var context = WorkflowTestFactory.CreateContext();
 
-        var queries = await agent.SynthesizeAsync(context);
+        var query = await agent.SynthesizeAsync(context);
 
-        queries.Should().ContainSingle().Which.Should().Be("recovered query");
+        query.Should().Be("recovered query");
         chat.CallCount.Should().Be(2);
     }
 
@@ -48,17 +49,16 @@ public class QuerySynthesisAgentTests
         var agent = CreateAgent(chat, new QuerySynthesisOptions { MaxAttempts = 2 });
         var context = WorkflowTestFactory.CreateContext(name: "Advisory Fuel Rates");
 
-        var queries = await agent.SynthesizeAsync(context);
+        var query = await agent.SynthesizeAsync(context);
 
-        queries.Should().ContainSingle();
-        queries[0].Should().Contain("Advisory Fuel Rates").And.Contain("update");
+        query.Should().Contain("Advisory Fuel Rates").And.Contain("update");
         chat.CallCount.Should().Be(2);
     }
 
     [Fact]
     public async Task SynthesizeAsync_FeedsPriorQueriesToModel_ToAvoidRedundancy()
     {
-        var chat = new FakeChatClient("""{"queries":["fresh angle"]}""");
+        var chat = new FakeChatClient("""{"query":"fresh angle"}""");
         var agent = CreateAgent(chat);
         var context = WorkflowTestFactory.CreateContext();
         context.History.Passes.Add(new LoopPass { Pass = 1, Query = "previously tried query" });
@@ -66,18 +66,6 @@ public class QuerySynthesisAgentTests
         await agent.SynthesizeAsync(context);
 
         chat.LastUserPrompt.Should().Contain("previously tried query");
-    }
-
-    [Fact]
-    public async Task SynthesizeAsync_DeduplicatesAndCapsQueries()
-    {
-        var chat = new FakeChatClient("""{"queries":["A","A","B","C","D","E"]}""");
-        var agent = CreateAgent(chat, new QuerySynthesisOptions { MaxQueries = 4 });
-        var context = WorkflowTestFactory.CreateContext();
-
-        var queries = await agent.SynthesizeAsync(context);
-
-        queries.Should().Equal("A", "B", "C", "D");
     }
 
     private static QuerySynthesisAgent CreateAgent(IChatClient chatClient, QuerySynthesisOptions? options = null) =>

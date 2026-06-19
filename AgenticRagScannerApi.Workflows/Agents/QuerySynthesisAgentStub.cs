@@ -16,7 +16,7 @@ public sealed class QuerySynthesisAgentStub : IQuerySynthesisAgent
 
     public QuerySynthesisAgentStub(ILogger<QuerySynthesisAgentStub> logger) => _logger = logger;
 
-    public Task<IReadOnlyList<string>> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
+    public Task<string> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
     {
         var pass = context.LoopCount + 1;
         var keywords = context.TopicGroup.Keywords;
@@ -26,11 +26,8 @@ public sealed class QuerySynthesisAgentStub : IQuerySynthesisAgent
             "QuerySynthesis stub ({PromptVersion}) for group '{GroupId}', pass {Pass}.",
             QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass);
 
-        IReadOnlyList<string> queries =
-        [
-            $"{primary} {context.Run.Jurisdiction} update (pass {pass})",
-        ];
+        var query = $"{primary} {context.Run.Jurisdiction} update (pass {pass})";
 
-        return Task.FromResult(queries);
+        return Task.FromResult(query);
     }
 }

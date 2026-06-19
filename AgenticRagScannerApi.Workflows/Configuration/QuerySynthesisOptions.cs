@@ -10,10 +10,6 @@ public sealed class QuerySynthesisOptions
 {
     public const string SectionName = "QuerySynthesis";
 
-    /// <summary>Soft cap on queries per pass; communicated to the model and enforced when parsing.</summary>
-    [Range(1, 20)]
-    public int MaxQueries { get; set; } = 4;
-
     /// <summary>Total attempts (initial call + retries) to obtain valid JSON before falling back.</summary>
     [Range(1, 5)]
     public int MaxAttempts { get; set; } = 2;

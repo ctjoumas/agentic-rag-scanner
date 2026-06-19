@@ -13,11 +13,13 @@ namespace AgenticRagScannerApi.Workflows.Agents;
 /// <summary>
 /// Epic 3 (story 3.3) real implementation of <see cref="IQuerySynthesisAgent"/>: a MAF
 /// <see cref="ChatClientAgent"/> over the shared Foundry model deployment (<see cref="IChatClient"/>).
-/// It synthesizes focused search-query strings from the topic group's keyword OR-list and, on re-loops,
-/// reads <see cref="SearchHistory"/> to rotate synonym coverage and avoid redundant queries. Output is
-/// structured JSON with a bounded retry on invalid JSON; after the retry budget is exhausted it falls
-/// back to a deterministic keyword query so the loop never stalls. It returns query strings only - the
-/// Web Search agent (Epic 4) executes them against Bing.
+/// It synthesizes a single focused search query from the topic group's keyword OR-list and, on re-loops,
+/// reads <see cref="SearchHistory"/> to rotate synonym coverage and avoid a redundant query. Breadth
+/// comes from the agentic loop (one query per pass), not from emitting many queries at once. Output uses
+/// Structured Outputs - a strict JSON schema derived from <see cref="QueryResult"/> - so the model returns
+/// a well-formed query without ad-hoc JSON parsing; a deterministic keyword query is used as a fallback
+/// if the model refuses or returns a blank result, so the loop never stalls. It returns a query string
+/// only - the Web Search agent (Epic 4) executes it against Bing.
 /// </summary>
 public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
 {
@@ -37,10 +39,10 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<string>> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
+    public async Task<string> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
     {
         var pass = context.LoopCount + 1;
-        var systemPrompt = QuerySynthesisPrompt.BuildSystemPrompt(context.Run.Jurisdiction, _options.MaxQueries);
+        var systemPrompt = QuerySynthesisPrompt.BuildSystemPrompt(context.Run.Jurisdiction);
         var userPrompt = QuerySynthesisPrompt.BuildUserPrompt(context);
 
         var agent = new ChatClientAgent(_chatClient, new ChatClientAgentOptions
@@ -50,96 +52,63 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
             {
                 Instructions = systemPrompt,
                 Temperature = _options.Temperature,
-                ResponseFormat = ChatResponseFormat.Json,
             },
         });
 
         for (var attempt = 1; attempt <= _options.MaxAttempts; attempt++)
         {
-            var message = attempt == 1
-                ? userPrompt
-                : userPrompt + "\n\nThe previous response was not valid JSON. Respond with JSON only, " +
-                  "in exactly this shape: {\"queries\":[\"...\"]}.";
-
-            var response = await agent.RunAsync(message, cancellationToken: cancellationToken);
-
-            if (TryParseQueries(response.Text, _options.MaxQueries, out var queries))
+            var query = await TrySynthesizeOnceAsync(agent, userPrompt, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(query))
             {
                 _logger.LogInformation(
-                    "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}: {Count} query(ies) on attempt {Attempt}.",
-                    QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass, queries.Count, attempt);
-                return queries;
+                    "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}: query synthesized on attempt {Attempt}.",
+                    QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass, attempt);
+                return query;
             }
 
             _logger.LogWarning(
-                "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}: invalid JSON on attempt {Attempt}/{MaxAttempts}.",
+                "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}: no usable query on attempt {Attempt}/{MaxAttempts}.",
                 QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass, attempt, _options.MaxAttempts);
         }
 
-        var fallback = BuildFallbackQueries(context);
+        var fallback = BuildFallbackQuery(context);
         _logger.LogWarning(
-            "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}: falling back to a deterministic query after {MaxAttempts} invalid attempt(s).",
+            "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}: falling back to a deterministic query after {MaxAttempts} attempt(s).",
             QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass, _options.MaxAttempts);
         return fallback;
     }
 
     /// <summary>
-    /// Parses the model's JSON (tolerating stray prose / code fences), then trims, drops blanks,
-    /// de-duplicates case-insensitively, and caps the count. Returns false on any failure.
+    /// Calls the model once using Structured Outputs (a strict JSON schema generated from
+    /// <see cref="QueryResult"/>) and returns the trimmed query, or <see langword="null"/> when the model
+    /// refuses or returns a blank / unparseable result.
     /// </summary>
-    private static bool TryParseQueries(string? text, int maxQueries, out IReadOnlyList<string> queries)
+    private async Task<string?> TrySynthesizeOnceAsync(ChatClientAgent agent, string userPrompt, CancellationToken cancellationToken)
     {
-        queries = [];
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return false;
-        }
-
         try
         {
-            var parsed = JsonSerializer.Deserialize<QueryListResult>(ExtractJsonObject(text), s_jsonOptions);
-            if (parsed?.Queries is null)
-            {
-                return false;
-            }
+            var response = await agent.RunAsync<QueryResult>(
+                userPrompt,
+                serializerOptions: s_jsonOptions,
+                cancellationToken: cancellationToken);
 
-            var cleaned = parsed.Queries
-                .Where(q => !string.IsNullOrWhiteSpace(q))
-                .Select(q => q.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(maxQueries)
-                .ToList();
-
-            if (cleaned.Count == 0)
-            {
-                return false;
-            }
-
-            queries = cleaned;
-            return true;
+            var query = response.Result.Query?.Trim();
+            return string.IsNullOrWhiteSpace(query) ? null : query;
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
-            return false;
+            return null;
         }
-    }
-
-    /// <summary>Extracts the first JSON object span from the text so wrapping prose/fences are ignored.</summary>
-    private static string ExtractJsonObject(string text)
-    {
-        var start = text.IndexOf('{');
-        var end = text.LastIndexOf('}');
-        return start >= 0 && end > start ? text[start..(end + 1)] : text;
     }
 
     /// <summary>Deterministic single-query fallback derived from the topic group's keywords.</summary>
-    private static IReadOnlyList<string> BuildFallbackQueries(TopicGroupContext context)
+    private static string BuildFallbackQuery(TopicGroupContext context)
     {
         var keywords = context.TopicGroup.Keywords;
         var primary = keywords.Count > 0 ? keywords[0] : context.TopicGroup.Name;
-        return [$"{primary} {context.Run.Jurisdiction} update"];
+        return $"{primary} {context.Run.Jurisdiction} update";
     }
 
-    private sealed record QueryListResult(
-        [property: JsonPropertyName("queries")] IReadOnlyList<string>? Queries);
+    private sealed record QueryResult(
+        [property: JsonPropertyName("query")] string? Query);
 }

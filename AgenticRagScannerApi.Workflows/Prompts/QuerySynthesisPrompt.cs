@@ -11,26 +11,27 @@ namespace AgenticRagScannerApi.Workflows.Prompts;
 public static class QuerySynthesisPrompt
 {
     /// <summary>Prompt version - bump when the instructions change.</summary>
-    public const string Version = "v1";
+    public const string Version = "v3";
 
-    /// <summary>Builds the system prompt: role, rules, and the required JSON response shape.</summary>
-    public static string BuildSystemPrompt(string jurisdiction, int maxQueries) =>
+    /// <summary>
+    /// Builds the system prompt: role and rules. The response shape is enforced by Structured Outputs
+    /// (a JSON schema), so the prompt describes the query, not the JSON wrapper.
+    /// </summary>
+    public static string BuildSystemPrompt(string jurisdiction) =>
         $$"""
         You are a query-synthesis assistant for a regulatory horizon-scanning system.
-        Turn a curated topic group into focused web-search queries that surface primary-source
+        Turn a curated topic group into a single focused web-search query that surfaces primary-source
         regulatory updates for the {{jurisdiction}} jurisdiction.
 
         Rules:
-        - Produce between 1 and {{maxQueries}} distinct, focused queries; you decide how many.
+        - Produce exactly one query - the single best query for this pass.
+        - This runs in an agentic loop: if a pass underperforms, a later pass synthesizes another
+          query. So do NOT try to cover everything at once - pick the highest-value angle now.
         - Target authoritative primary sources (government, regulators, legislation, official guidance).
-        - Rotate synonym and alias coverage across the topic group's keyword OR-list. Do NOT repeat
-          queries already tried in earlier passes - cover untested synonyms and gaps instead.
-        - Keep each query concise, like a search box entry: no boolean operators, quotes, or site: filters.
+        - Rotate synonym and alias coverage across the topic group's keyword OR-list. Do NOT repeat a
+          query already tried in earlier passes - cover an untested synonym or gap instead.
+        - Keep the query concise, like a search box entry: no boolean operators, quotes, or site: filters.
         - Prefer recency-oriented phrasing (for example "update" or "change") where it helps.
-
-        Respond with JSON only, in exactly this shape:
-        {"queries":["first query","second query"]}
-        Output JSON only - no prose, no markdown, no code fences.
         """;
 
     /// <summary>Builds the user prompt: the topic group, pass number, keyword OR-list, and prior queries.</summary>
@@ -63,7 +64,7 @@ public static class QuerySynthesisPrompt
             }
         }
 
-        builder.Append("Return JSON only.");
+        builder.Append("Return the single best query for this pass.");
         return builder.ToString();
     }
 }
