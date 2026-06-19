@@ -73,8 +73,8 @@ public sealed class TopicGroupPipeline
         // 2. Bing search (allowlist-gated tool).
         var hits = await _bingSearch.SearchAsync(query, context.Run, cancellationToken);
 
-        // 3. Deterministic pre-filter (dedupe incl. earlier passes + URL validity).
-        var filtered = _preFilter.Filter(hits, context.History);
+        // 3. Deterministic pre-filter (dedupe incl. earlier passes + cross-group + URL validity).
+        var filtered = _preFilter.Filter(hits, context);
         pass.Hits.AddRange(filtered);
 
         // 4. Full-text fetch & clean (snippet fallback flags Unverified, never drops).

@@ -25,5 +25,13 @@
     "Endpoint": "https://cosmoswxdev001.documents.azure.com:443/",
     "Database": "agentic-rag-scanner",
     "CheckpointsContainer": "checkpoints"
+  },
+  "WebSearch": {
+    "ProjectEndpoint": "https://<your-foundry-resource>.services.ai.azure.com/api/projects/<your-project>",
+    "ModelDeploymentName": "<your-model-deployment-name>",
+    "AgentName": "WebSearch",
+    "ConnectionId": "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/<account>/projects/<project>/connections/<bing-connection-name>",
+    "InstanceName": "<your-bing-custom-search-instance-name>",
+    "MaxResults": 10
   }
 }

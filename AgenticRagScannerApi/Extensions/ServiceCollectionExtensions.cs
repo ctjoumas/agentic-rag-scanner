@@ -14,15 +14,22 @@ using AgenticRagScannerApi.Workflows.Steps;
 using AgenticRagScannerApi.Workflows.Tools;
 using Azure;
 using Azure.AI.OpenAI;
+using Azure.AI.Projects;
+using Azure.AI.Projects.Agents;
 using Azure.Core;
 using Azure.Identity;
+using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Foundry;
 using Azure.Search.Documents;
 using Azure.Storage.Blobs;
 using FluentValidation;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
+using Polly;
+using Polly.Retry;
 using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
+using System.ClientModel;
 
 namespace AgenticRagScannerApi.Extensions;
 
@@ -49,6 +56,7 @@ public static class ServiceCollectionExtensions
         services.AddOptions<FoundryOptions>().Bind(configuration.GetSection(FoundryOptions.SectionName)).ValidateDataAnnotations();
         services.AddOptions<QuerySynthesisOptions>().Bind(configuration.GetSection(QuerySynthesisOptions.SectionName)).ValidateDataAnnotations();
         services.AddOptions<CosmosOptions>().Bind(configuration.GetSection(CosmosOptions.SectionName)).ValidateDataAnnotations();
+        services.AddOptions<WebSearchOptions>().Bind(configuration.GetSection(WebSearchOptions.SectionName)).ValidateDataAnnotations();
 
         return services;
     }
@@ -166,7 +174,53 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IFetchAndCleanStep, FetchAndCleanStep>();
         services.AddSingleton<ILoopController, LoopController>();
         services.AddSingleton<IVerdictRouting, VerdictRouting>();
-        services.AddSingleton<IBingSearchTool, BingSearchTool>();
+
+        // Web Search agent (Epic 4, story 4.1): a hosted Foundry agent carrying a Grounding with Bing
+        // Custom Search tool, so grounding is restricted to the customer's curated domains. The
+        // Foundry-specific construction lives here in the composition root; BingGroundingWebSearchAgent
+        // itself depends only on the MAF AIAgent abstraction.
+        services.AddSingleton<IBingSearchTool>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<WebSearchOptions>>().Value;
+
+            var projectClient = new AIProjectClient(
+                new Uri(options.ProjectEndpoint),
+                sp.GetRequiredService<TokenCredential>());
+
+            var bingTool = FoundryAITool.CreateBingCustomSearchTool(
+                new BingCustomSearchToolOptions(
+                [
+                    new BingCustomSearchConfiguration(options.ConnectionId, options.InstanceName)
+                ]));
+
+            AIAgent agent = projectClient.AsAIAgent(
+                options.ModelDeploymentName,
+                instructions: options.Instructions,
+                name: options.AgentName,
+                tools: [bingTool]);
+
+            // Retry transient Bing-grounding failures with exponential backoff + jitter and a per-attempt
+            // timeout, mirroring ResilientChatClient. A single agent error still degrades gracefully:
+            // once retries are exhausted the agent logs and returns no hits rather than aborting the run.
+            var resilience = new ResiliencePipelineBuilder()
+                .AddRetry(new RetryStrategyOptions
+                {
+                    MaxRetryAttempts = options.MaxRetries,
+                    BackoffType = DelayBackoffType.Exponential,
+                    UseJitter = true,
+                    Delay = TimeSpan.FromSeconds(options.RetryBaseDelaySeconds),
+                    ShouldHandle = static args => ValueTask.FromResult(IsTransientWebSearchFailure(args.Outcome.Exception)),
+                })
+                .AddTimeout(TimeSpan.FromSeconds(options.RequestTimeoutSeconds))
+                .Build();
+
+            return new BingGroundingWebSearchAgent(
+                agent,
+                sp.GetRequiredService<IOptions<WebSearchOptions>>(),
+                sp.GetRequiredService<ISharedThrottle>(),
+                resilience,
+                sp.GetRequiredService<ILogger<BingGroundingWebSearchAgent>>());
+        });
 
         // Loop composition + the MAF Cosmos checkpoint store.
         services.AddSingleton<TopicGroupPipeline>();
@@ -174,6 +228,20 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// Classifies an exception thrown by the hosted Web Search agent as transient (worth retrying).
+    /// Matches the transient surface used by <see cref="ResilientChatClient"/>: connection drops,
+    /// request timeouts, throttling (429), and server-side (5xx) failures.
+    /// </summary>
+    private static bool IsTransientWebSearchFailure(Exception? exception) => exception switch
+    {
+        ClientResultException clientResult => clientResult.Status is 0 or 408 or 429 or >= 500,
+        RequestFailedException requestFailed => requestFailed.Status is 0 or 408 or 429 or >= 500,
+        HttpRequestException => true,
+        TimeoutException => true,
+        _ => false,
+    };
 
     public static IServiceCollection AddValidationServices(this IServiceCollection services)
     {

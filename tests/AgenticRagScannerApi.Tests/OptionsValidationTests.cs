@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using AgenticRagScannerApi.Configuration;
+using AgenticRagScannerApi.Workflows.Configuration;
 using FluentAssertions;
 
 namespace AgenticRagScannerApi.Tests;
@@ -51,5 +52,47 @@ public class OptionsValidationTests
         };
 
         Validate(options).Should().Contain(r => r.MemberNames.Contains(nameof(FoundryOptions.Endpoint)));
+    }
+
+    [Fact]
+    public void WebSearchOptions_WhenFullyConfigured_ShouldBeValid()
+    {
+        var options = new WebSearchOptions
+        {
+            ProjectEndpoint = "https://project.example.com",
+            ModelDeploymentName = "gpt-4o",
+            ConnectionId = "connection",
+            InstanceName = "instance",
+        };
+
+        Validate(options).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void WebSearchOptions_WithNonUrlProjectEndpoint_ShouldFailUrl()
+    {
+        var options = new WebSearchOptions
+        {
+            ProjectEndpoint = "<your-foundry-project-endpoint>",  // placeholder must NOT pass [Url]
+            ModelDeploymentName = "gpt-4o",
+            ConnectionId = "connection",
+            InstanceName = "instance",
+        };
+
+        Validate(options).Should().Contain(r => r.MemberNames.Contains(nameof(WebSearchOptions.ProjectEndpoint)));
+    }
+
+    [Fact]
+    public void WebSearchOptions_WithEmptyConnectionId_ShouldFailRequired()
+    {
+        var options = new WebSearchOptions
+        {
+            ProjectEndpoint = "https://project.example.com",
+            ModelDeploymentName = "gpt-4o",
+            ConnectionId = "",
+            InstanceName = "instance",
+        };
+
+        Validate(options).Should().Contain(r => r.MemberNames.Contains(nameof(WebSearchOptions.ConnectionId)));
     }
 }
