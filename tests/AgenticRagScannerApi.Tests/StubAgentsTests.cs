@@ -11,15 +11,14 @@ namespace AgenticRagScannerApi.Tests;
 public class StubAgentsTests
 {
     [Fact]
-    public async Task QuerySynthesis_ReturnsNonEmptyQueries()
+    public async Task QuerySynthesis_ReturnsNonEmptyQuery()
     {
         var context = WorkflowTestFactory.CreateContext();
         var agent = new QuerySynthesisAgentStub(NullLogger<QuerySynthesisAgentStub>.Instance);
 
-        var queries = await agent.SynthesizeAsync(context);
+        var query = await agent.SynthesizeAsync(context);
 
-        queries.Should().NotBeEmpty();
-        queries.Should().OnlyContain(q => !string.IsNullOrWhiteSpace(q));
+        query.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]

@@ -52,15 +52,4 @@ public class OptionsValidationTests
 
         Validate(options).Should().Contain(r => r.MemberNames.Contains(nameof(FoundryOptions.Endpoint)));
     }
-
-    [Fact]
-    public void BingCustomSearchGroundingOptions_WithMissingIds_ShouldFailRequired()
-    {
-        var options = new BingCustomSearchGroundingOptions();
-
-        var results = Validate(options);
-
-        results.Should().Contain(r => r.MemberNames.Contains(nameof(BingCustomSearchGroundingOptions.ConnectionId)));
-        results.Should().Contain(r => r.MemberNames.Contains(nameof(BingCustomSearchGroundingOptions.CustomConfigurationId)));
-    }
 }

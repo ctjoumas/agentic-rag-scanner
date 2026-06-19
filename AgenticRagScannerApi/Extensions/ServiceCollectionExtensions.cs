@@ -13,12 +13,14 @@ using AgenticRagScannerApi.Workflows.Pipeline;
 using AgenticRagScannerApi.Workflows.Steps;
 using AgenticRagScannerApi.Workflows.Tools;
 using Azure;
+using Azure.AI.OpenAI;
 using Azure.Core;
 using Azure.Identity;
 using Azure.Search.Documents;
 using Azure.Storage.Blobs;
 using FluentValidation;
 using Microsoft.Azure.Cosmos;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
 
@@ -32,6 +34,7 @@ public static class ServiceCollectionExtensions
             .AddConfiguredOptions(configuration)
             .AddAzureSdkClients()
             .AddCoreServices()
+            .AddFoundryChatClient()
             .AddWorkflowServices()
             .AddOrchestrationServices()
             .AddValidationServices()
@@ -44,8 +47,7 @@ public static class ServiceCollectionExtensions
         services.AddOptions<AzureStorageOptions>().Bind(configuration.GetSection(AzureStorageOptions.SectionName)).ValidateDataAnnotations();
         services.AddOptions<AzureSearchOptions>().Bind(configuration.GetSection(AzureSearchOptions.SectionName)).ValidateDataAnnotations();
         services.AddOptions<FoundryOptions>().Bind(configuration.GetSection(FoundryOptions.SectionName)).ValidateDataAnnotations();
-        services.AddOptions<BingSearchGroundingOptions>().Bind(configuration.GetSection(BingSearchGroundingOptions.SectionName)).ValidateDataAnnotations();
-        services.AddOptions<BingCustomSearchGroundingOptions>().Bind(configuration.GetSection(BingCustomSearchGroundingOptions.SectionName)).ValidateDataAnnotations();
+        services.AddOptions<QuerySynthesisOptions>().Bind(configuration.GetSection(QuerySynthesisOptions.SectionName)).ValidateDataAnnotations();
         services.AddOptions<CosmosOptions>().Bind(configuration.GetSection(CosmosOptions.SectionName)).ValidateDataAnnotations();
 
         return services;
@@ -94,8 +96,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAzureStorageService, AzureStorageService>();
         services.AddSingleton<IAzureSearchService, AzureSearchService>();
         services.AddSingleton<IFoundryService, FoundryService>();
-        services.AddSingleton<IBingSearchGroundingService, BingSearchGroundingService>();
-        services.AddSingleton<IBingCustomSearchGroundingService, BingCustomSearchGroundingService>();
         services.AddSingleton<IScanMapper, ScanMapper>();
 
         // Shared throttle - Phase 0 pass-through; real TPM/RPM/QPS limits arrive later.
@@ -103,6 +103,39 @@ public static class ServiceCollectionExtensions
 
         // Keyless auth - inject this TokenCredential into Azure SDK clients (keys are local-dev only).
         services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
+
+        return services;
+    }
+
+    public static IServiceCollection AddFoundryChatClient(this IServiceCollection services)
+    {
+        // The single Foundry chat client (Microsoft.Extensions.AI IChatClient) that every MAF agent
+        // references (Epic 3, story 3.1). Built directly against the Foundry model deployment - keyless
+        // via DefaultAzureCredential, with an API key honored for local dev. Wrapped with a Polly
+        // resilience pipeline + the shared throttle (ResilientChatClient) and OpenTelemetry GenAI
+        // instrumentation so token/latency metrics are emitted once an exporter is wired (story 0.5).
+        services.AddSingleton<IChatClient>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<FoundryOptions>>().Value;
+
+            var azureClient = string.IsNullOrWhiteSpace(options.ApiKey)
+                ? new AzureOpenAIClient(new Uri(options.Endpoint), sp.GetRequiredService<TokenCredential>())
+                : new AzureOpenAIClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey));
+
+            IChatClient inner = azureClient
+                .GetChatClient(options.ModelDeploymentName)
+                .AsIChatClient();
+
+            IChatClient resilient = new ResilientChatClient(
+                inner,
+                sp.GetRequiredService<ISharedThrottle>(),
+                options,
+                sp.GetRequiredService<ILogger<ResilientChatClient>>());
+
+            return new ChatClientBuilder(resilient)
+                .UseOpenTelemetry()
+                .Build(sp);
+        });
 
         return services;
     }
@@ -120,9 +153,9 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddWorkflowServices(this IServiceCollection services)
     {
-        // MAF workflow scaffolding (Epic 2). Agents are stubs (no LLM calls yet); the real
-        // Foundry-backed implementations arrive in Epics 3/6/7.
-        services.AddSingleton<IQuerySynthesisAgent, QuerySynthesisAgentStub>();
+        // MAF workflow agents. Query Synthesis is the first real agent (Epic 3) - a MAF agent over the
+        // shared Foundry IChatClient; the remaining four stay stubs (no LLM calls) until Epics 6/7.
+        services.AddSingleton<IQuerySynthesisAgent, QuerySynthesisAgent>();
         services.AddSingleton<IRelevanceEvalAgent, RelevanceEvalAgentStub>();
         services.AddSingleton<IEnrichmentAgent, EnrichmentAgentStub>();
         services.AddSingleton<ICategorizeAgent, CategorizeAgentStub>();

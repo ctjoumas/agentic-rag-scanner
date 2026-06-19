@@ -62,9 +62,9 @@ public sealed class TopicGroupPipeline
     /// </summary>
     public async Task<LoopDecision> RunPassAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
     {
-        // 1. Query synthesis - reads SearchHistory to rotate synonyms / avoid redundancy.
-        var queries = await _querySynthesis.SynthesizeAsync(context, cancellationToken);
-        var query = queries.Count > 0 ? queries[0] : context.TopicGroup.Name;
+        // 1. Query synthesis - reads SearchHistory to rotate synonyms / avoid redundancy. One query
+        //    per pass: breadth comes from the agentic loop re-synthesizing on later passes.
+        var query = await _querySynthesis.SynthesizeAsync(context, cancellationToken);
 
         // Start the pass and append it so LoopCount reflects this pass during eval/control.
         var pass = new LoopPass { Pass = context.LoopCount + 1, Query = query };
