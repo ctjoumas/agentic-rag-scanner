@@ -19,14 +19,12 @@ namespace AgenticRagScannerApi.Tests;
 /// real <see cref="ChatClientAgent"/> over a fake <see cref="IChatClient"/>, so the actual MAF response
 /// pipeline runs without any Azure SDK.
 /// </summary>
-public class BingGroundingWebSearchAgentTests
+public class WebSearchAgentTests
 {
     private static WebSearchOptions NewOptions(int maxResults = 10) => new()
     {
         ProjectEndpoint = "https://project.example.com",
-        ModelDeploymentName = "gpt-4o",
-        ConnectionId = "connection",
-        InstanceName = "instance",
+        AgentName = "WebSearch",
         MaxResults = maxResults,
     };
 
@@ -37,13 +35,13 @@ public class BingGroundingWebSearchAgentTests
         AuthoritativeSources = allowlist ?? [],
     };
 
-    private static BingGroundingWebSearchAgent NewSut(IChatClient chatClient, WebSearchOptions? options = null) =>
+    private static WebSearchAgent NewSut(IChatClient chatClient, WebSearchOptions? options = null) =>
         new(
             new ChatClientAgent(chatClient),
             Options.Create(options ?? NewOptions()),
             new NoOpThrottle(),
             ResiliencePipeline.Empty,
-            NullLogger<BingGroundingWebSearchAgent>.Instance);
+            NullLogger<WebSearchAgent>.Instance);
 
     private static AIContent Citation(string url, string? title = null, string? snippet = null) =>
         new TextContent(string.Empty)
@@ -152,12 +150,12 @@ public class BingGroundingWebSearchAgentTests
             })
             .Build();
 
-        var sut = new BingGroundingWebSearchAgent(
+        var sut = new WebSearchAgent(
             new ChatClientAgent(chatClient),
             Options.Create(NewOptions()),
             new NoOpThrottle(),
             retryOnce,
-            NullLogger<BingGroundingWebSearchAgent>.Instance);
+            NullLogger<WebSearchAgent>.Instance);
 
         var hits = await sut.SearchAsync("query", NewRun());
 

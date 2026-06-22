@@ -110,8 +110,7 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
 | Service | Role | Status |
 |---------|------|--------|
 | **Microsoft Foundry** | Hosts the models used for all LLM calls (query synthesis, eval, categorize, summarize). | Core |
-| **Bing — Grounding with Bing Search** | Web search over the primary-source allowlist. | Core |
-| **Bing — Grounding with Bing Custom Search** | Custom-scoped search grounding. | Core |
+| **Grounding with Bing Custom Search** (via a pre-provisioned Foundry Web Search agent) | Allowlist-scoped web search; the agent is created in the Foundry portal and referenced by name. | Core |
 | **Azure Storage account** | Blob/file storage for fetched documents, exports, working artifacts. | Core |
 | **Azure AI Search** | Leaning choice for the (FUTURE) memory/learnings store (#8). | Planned |
 | **Azure Cosmos DB** | Versioned result docs (#16), one per item per run. | Core (data) |
@@ -135,8 +134,7 @@ a Web API only** and **manually trigger** scans. The Function can be added later
   - Azure Storage account service
   - Azure AI Search service
   - Microsoft Foundry service (LLM calls)
-  - Bing grounding service — **Grounding with Bing Search**
-  - Bing grounding service — **Grounding with Bing Custom Search**
+  - Web Search agent — a pre-provisioned Foundry agent using **Grounding with Bing Custom Search**
 - **Dependency injection** wired throughout (interfaces registered in DI; services injected into
   controllers/handlers).
 - Typical layering: API (controllers/endpoints) → Services (interfaces + implementations) → models/config.

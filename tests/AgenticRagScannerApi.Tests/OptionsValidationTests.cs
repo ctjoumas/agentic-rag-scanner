@@ -60,9 +60,7 @@ public class OptionsValidationTests
         var options = new WebSearchOptions
         {
             ProjectEndpoint = "https://project.example.com",
-            ModelDeploymentName = "gpt-4o",
-            ConnectionId = "connection",
-            InstanceName = "instance",
+            AgentName = "WebSearch",
         };
 
         Validate(options).Should().BeEmpty();
@@ -74,25 +72,21 @@ public class OptionsValidationTests
         var options = new WebSearchOptions
         {
             ProjectEndpoint = "<your-foundry-project-endpoint>",  // placeholder must NOT pass [Url]
-            ModelDeploymentName = "gpt-4o",
-            ConnectionId = "connection",
-            InstanceName = "instance",
+            AgentName = "WebSearch",
         };
 
         Validate(options).Should().Contain(r => r.MemberNames.Contains(nameof(WebSearchOptions.ProjectEndpoint)));
     }
 
     [Fact]
-    public void WebSearchOptions_WithEmptyConnectionId_ShouldFailRequired()
+    public void WebSearchOptions_WithEmptyAgentName_ShouldFailRequired()
     {
         var options = new WebSearchOptions
         {
             ProjectEndpoint = "https://project.example.com",
-            ModelDeploymentName = "gpt-4o",
-            ConnectionId = "",
-            InstanceName = "instance",
+            AgentName = "",
         };
 
-        Validate(options).Should().Contain(r => r.MemberNames.Contains(nameof(WebSearchOptions.ConnectionId)));
+        Validate(options).Should().Contain(r => r.MemberNames.Contains(nameof(WebSearchOptions.AgentName)));
     }
 }

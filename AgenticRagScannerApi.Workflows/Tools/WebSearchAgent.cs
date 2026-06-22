@@ -11,29 +11,30 @@ using Polly;
 namespace AgenticRagScannerApi.Workflows.Tools;
 
 /// <summary>
-/// Epic 4 (story 4.1) real implementation of <see cref="IBingSearchTool"/>. It runs a hosted Foundry
-/// Web Search agent (an <see cref="AIAgent"/> carrying a Grounding with Bing Custom Search tool) for the
-/// synthesized query and maps the response's URL citations into <see cref="SearchHit"/>s. Grounding is
-/// already scoped to the customer's curated domains by the Bing Custom Search configuration; the
-/// allowlist check here is defense-in-depth. The agent never throws to abort a run - on failure or zero
-/// citations it logs and returns an empty list, letting the loop controller decide what to do next.
-/// The Foundry-specific agent construction lives in the composition root (DI), so this class depends only
-/// on the MAF <see cref="AIAgent"/> abstraction and is fully unit-testable with a fake agent.
+/// Epic 4 (story 4.1) real implementation of <see cref="IWebSearchAgent"/>. It runs a pre-provisioned
+/// Foundry Web Search agent (an <see cref="AIAgent"/> resolved by name from the portal, configured there
+/// with Grounding with Bing Custom Search) for the synthesized query and maps the response's URL
+/// citations into <see cref="SearchHit"/>s. Grounding is already scoped to the customer's curated domains
+/// by the agent's Bing Custom Search configuration; the allowlist check here is defense-in-depth. The
+/// agent never throws to abort a run - on failure or zero citations it logs and returns an empty list,
+/// letting the loop controller decide what to do next. The Foundry-specific agent resolution lives in the
+/// composition root (DI), so this class depends only on the MAF <see cref="AIAgent"/> abstraction and is
+/// fully unit-testable with a fake agent.
 /// </summary>
-public sealed class BingGroundingWebSearchAgent : IBingSearchTool
+public sealed class WebSearchAgent : IWebSearchAgent
 {
     private readonly AIAgent _agent;
     private readonly WebSearchOptions _options;
     private readonly ISharedThrottle _throttle;
     private readonly ResiliencePipeline _resilience;
-    private readonly ILogger<BingGroundingWebSearchAgent> _logger;
+    private readonly ILogger<WebSearchAgent> _logger;
 
-    public BingGroundingWebSearchAgent(
+    public WebSearchAgent(
         AIAgent agent,
         IOptions<WebSearchOptions> options,
         ISharedThrottle throttle,
         ResiliencePipeline resilience,
-        ILogger<BingGroundingWebSearchAgent> logger)
+        ILogger<WebSearchAgent> logger)
     {
         _agent = agent;
         _options = options.Value;
