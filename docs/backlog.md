@@ -96,7 +96,7 @@ text remains (primer §1).
 
 ## ✅ Epic 2 — MAF workflow scaffolding (stub agents) · `phase-2` · *L1 + L2* · **Complete**
 > All agents + steps present but **stubbed**. **Sync point:** agent I/O contracts frozen here.
-> **Agent hosting:** Query Synthesis and the four downstream agents (Eval, Enrichment, Categorize, Summarize) are **MAF agents over a Foundry model deployment**; the **Web Search agent** is the solution's single **Foundry agent** (Grounding with Bing Custom Search tool) the MAF workflow **references** — it **executes the queries** synthesized by the Query Synthesis MAF agent.
+> **Agent hosting:** Query Synthesis and the four downstream agents (Eval, Enrichment, Categorize, Summarize) are **MAF agents over a Foundry model deployment**; the **Web Search agent** is a **pre-provisioned Foundry agent** (created in the Foundry portal with the Grounding with Bing Custom Search tool) the MAF workflow **resolves by name and runs** — it **executes the queries** synthesized by the Query Synthesis MAF agent.
 
 ### 2.1 — `AgenticRagScanner.Workflows` + one MAF workflow per group + Cosmos checkpointing · `lane:L1-orchestration`
 **AC:** Workflows project added; one MAF workflow per topic group; **MAF Cosmos checkpointing** wired to
@@ -167,7 +167,7 @@ synonyms / avoid redundancy; agent decides query count; structured output + boun
 
 ### 4.1 — Web Search agent (Foundry agent w/ Grounding with Bing Custom Search), allowlist-scoped · `lane:L2-agents`
 **AC:**
-- Implement the **Web Search agent** as the solution's single **Foundry agent** with the **Grounding with Bing Custom Search** tool, **referenced by MAF**; it **executes the Query Synthesis agent's queries** and returns grounded hits/citations.
+- Implement the **Web Search agent** as a **pre-provisioned Foundry agent** (created in the Foundry portal with the **Grounding with Bing Custom Search** tool), **resolved by name** (optionally a pinned version) and run by the MAF workflow; it **executes the Query Synthesis agent's queries** and returns grounded hits/citations. The client-side adapter is `WebSearchAgent : IWebSearchAgent` over the MAF `AIAgent` abstraction — no tool/agent is constructed in code.
 - Scope the **Grounding with Bing Custom Search** instance to the **primary-source allowlist** so grounding is allowlist-restricted; verify hits/citations are limited to allowlisted domains.
 - Supersedes the standalone `IBingSearchGroundingService` / `IBingCustomSearchGroundingService` — grounding is owned by the Foundry agent's tool.
 `labels: user-story, area:bing` · **depends on:** 2.4, 3.3 · *(merged: former 4.1 + 4.2)*

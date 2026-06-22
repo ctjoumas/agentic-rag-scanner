@@ -28,10 +28,7 @@
   },
   "WebSearch": {
     "ProjectEndpoint": "https://<your-foundry-resource>.services.ai.azure.com/api/projects/<your-project>",
-    "ModelDeploymentName": "<your-model-deployment-name>",
-    "AgentName": "WebSearch",
-    "ConnectionId": "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/<account>/projects/<project>/connections/<bing-connection-name>",
-    "InstanceName": "<your-bing-custom-search-instance-name>",
+    "AgentName": "<your-web-search-agent-name>",
     "MaxResults": 10
   }
 }

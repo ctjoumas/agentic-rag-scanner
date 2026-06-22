@@ -10,7 +10,7 @@ namespace AgenticRagScannerApi.Workflows.Pipeline;
 /// <summary>
 /// Encapsulates one topic group's agentic RAG loop in the frozen order, threading
 /// <see cref="SearchHistory"/> through each pass:
-/// QuerySynthesis → BingSearch(tool) → Pre-filter → Fetch&amp;Clean → RelevanceEval → LoopController,
+/// QuerySynthesis → WebSearch(agent) → Pre-filter → Fetch&amp;Clean → RelevanceEval → LoopController,
 /// then (on finalize) VerdictRouting → Enrichment → Categorize → Summarize&amp;Impact.
 /// The MAF executor is a thin adapter over this pipeline, so the loop is unit-testable without
 /// standing up a workflow.
@@ -18,7 +18,7 @@ namespace AgenticRagScannerApi.Workflows.Pipeline;
 public sealed class TopicGroupPipeline
 {
     private readonly IQuerySynthesisAgent _querySynthesis;
-    private readonly IBingSearchTool _bingSearch;
+    private readonly IWebSearchAgent _webSearch;
     private readonly IPreFilterStep _preFilter;
     private readonly IFetchAndCleanStep _fetchAndClean;
     private readonly IRelevanceEvalAgent _relevanceEval;
@@ -31,7 +31,7 @@ public sealed class TopicGroupPipeline
 
     public TopicGroupPipeline(
         IQuerySynthesisAgent querySynthesis,
-        IBingSearchTool bingSearch,
+        IWebSearchAgent webSearch,
         IPreFilterStep preFilter,
         IFetchAndCleanStep fetchAndClean,
         IRelevanceEvalAgent relevanceEval,
@@ -43,7 +43,7 @@ public sealed class TopicGroupPipeline
         ILogger<TopicGroupPipeline> logger)
     {
         _querySynthesis = querySynthesis;
-        _bingSearch = bingSearch;
+        _webSearch = webSearch;
         _preFilter = preFilter;
         _fetchAndClean = fetchAndClean;
         _relevanceEval = relevanceEval;
@@ -71,7 +71,7 @@ public sealed class TopicGroupPipeline
         context.History.Passes.Add(pass);
 
         // 2. Bing search (allowlist-gated tool).
-        var hits = await _bingSearch.SearchAsync(query, context.Run, cancellationToken);
+        var hits = await _webSearch.SearchAsync(query, context.Run, cancellationToken);
 
         // 3. Deterministic pre-filter (dedupe incl. earlier passes + cross-group + URL validity).
         var filtered = _preFilter.Filter(hits, context);

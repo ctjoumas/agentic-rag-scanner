@@ -18,37 +18,21 @@ public sealed class WebSearchOptions
     [Url]
     public string ProjectEndpoint { get; set; } = string.Empty;
 
-    /// <summary>Model deployment the Web Search agent runs on.</summary>
-    [Required]
-    public string ModelDeploymentName { get; set; } = string.Empty;
-
-    /// <summary>Display name for the hosted Web Search agent.</summary>
-    [Required]
-    public string AgentName { get; set; } = "WebSearch";
-
     /// <summary>
-    /// ARM connection id for the Bing Custom Search resource
-    /// (e.g. <c>/subscriptions/.../projects/&lt;name&gt;/connections/&lt;connection-name&gt;</c>).
+    /// Name of the pre-provisioned hosted Web Search agent (created in the Foundry portal with the
+    /// Grounding with Bing Custom Search tool attached). The hosted agent owns its model, instructions,
+    /// and tools; this app references it by name and resolves the latest version unless
+    /// <see cref="AgentVersion"/> is set.
     /// </summary>
     [Required]
-    public string ConnectionId { get; set; } = string.Empty;
+    public string AgentName { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Bing Custom Search configuration ("instance") name that defines which sites/domains to search.
-    /// This is the configuration name from the Bing Custom Search resource, not the Azure resource name.
-    /// </summary>
-    [Required]
-    public string InstanceName { get; set; } = string.Empty;
+    /// <summary>Optional hosted-agent version to pin; when empty the latest version is resolved by name.</summary>
+    public string? AgentVersion { get; set; }
 
     /// <summary>Maximum number of search hits to surface per query (after de-duplication).</summary>
     [Range(1, 50)]
     public int MaxResults { get; set; } = 10;
-
-    /// <summary>System instructions for the agent; the default asks it to search and cite authoritative sources.</summary>
-    [Required]
-    public string Instructions { get; set; } =
-        "You are a web search assistant for a regulatory horizon scanner. For each user query, use the " +
-        "Bing Custom Search tool to find authoritative primary sources, and always cite every source you use.";
 
     /// <summary>Maximum retry attempts the resilience pipeline makes on transient Web Search agent failures.</summary>
     [Range(0, 10)]

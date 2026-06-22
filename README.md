@@ -57,8 +57,9 @@ Auditor Request (date + jurisdiction + topic groups)
 ```
 
 The **Query Synthesis** and downstream agents are **MAF agents over a Microsoft Foundry model
-deployment**. The **Web Search** agent is a **Foundry agent** using *Grounding with Bing Custom
-Search*, which the MAF workflow references to execute the synthesized queries. A per-run, in-memory
+deployment**. The **Web Search** agent is a **pre-provisioned Foundry agent** (created in the Foundry
+portal with *Grounding with Bing Custom Search*), which the MAF workflow resolves by name and runs to
+execute the synthesized queries. A per-run, in-memory
 **search history** (`searchQueries[]`, `vettedResults[]`, `discardedResults[]`) feeds both query
 synthesis (to avoid redundant queries) and evaluation (to assess coverage).
 
@@ -136,8 +137,8 @@ Cognitive Services roles).
    Key configuration sections:
 
    - `Foundry` — Foundry endpoint + model deployment name (downstream MAF agents)
-   - `WebSearch` — Foundry project endpoint, model deployment, and the Bing Custom Search
-     connection id / instance name
+   - `WebSearch` — Foundry project endpoint + the name of the pre-provisioned Web Search
+     agent (optionally a pinned `AgentVersion`)
    - `Cosmos` — account endpoint, database, and checkpoints container
    - `AzureStorage` — blob service URI + container names (`documents`, `exports`)
    - `AzureSearch` — search endpoint + index name (planned memory store)

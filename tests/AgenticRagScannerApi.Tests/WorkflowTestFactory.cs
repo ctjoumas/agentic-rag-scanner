@@ -41,7 +41,7 @@ internal static class WorkflowTestFactory
     public static TopicGroupPipeline CreatePipeline() =>
         new(
             new QuerySynthesisAgentStub(NullLogger<QuerySynthesisAgentStub>.Instance),
-            new FakeBingSearchTool(),
+            new FakeWebSearchAgent(),
             new PreFilterStep(NullLogger<PreFilterStep>.Instance),
             new FetchAndCleanStep(NullLogger<FetchAndCleanStep>.Instance),
             new RelevanceEvalAgentStub(NullLogger<RelevanceEvalAgentStub>.Instance),
@@ -81,11 +81,11 @@ internal static class WorkflowTestFactory
 }
 
 /// <summary>
-/// Deterministic <see cref="IBingSearchTool"/> test double for the workflow pipeline tests. Returns a
+/// Deterministic <see cref="IWebSearchAgent"/> test double for the workflow pipeline tests. Returns a
 /// fixed set of canned, allowlist-scoped hits per query (no network), replacing the former production
 /// <c>BingSearchTool</c> stub that Epic 4 removed.
 /// </summary>
-internal sealed class FakeBingSearchTool : IBingSearchTool
+internal sealed class FakeWebSearchAgent : IWebSearchAgent
 {
     private const string DefaultAllowlistHost = "www.gov.uk";
 

@@ -169,17 +169,18 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICategorizeAgent, CategorizeAgentStub>();
         services.AddSingleton<ISummarizeImpactAgent, SummarizeImpactAgentStub>();
 
-        // Deterministic steps + the allowlist-gated Bing tool (canned hits in Epic 2).
+        // Deterministic steps + the allowlist-gated web search agent (canned hits in Epic 2).
         services.AddSingleton<IPreFilterStep, PreFilterStep>();
         services.AddSingleton<IFetchAndCleanStep, FetchAndCleanStep>();
         services.AddSingleton<ILoopController, LoopController>();
         services.AddSingleton<IVerdictRouting, VerdictRouting>();
 
-        // Web Search agent (Epic 4, story 4.1): a hosted Foundry agent carrying a Grounding with Bing
-        // Custom Search tool, so grounding is restricted to the customer's curated domains. The
-        // Foundry-specific construction lives here in the composition root; BingGroundingWebSearchAgent
-        // itself depends only on the MAF AIAgent abstraction.
-        services.AddSingleton<IBingSearchTool>(sp =>
+        // Web Search agent (Epic 4, story 4.1): references the pre-provisioned hosted Foundry agent
+        // (created in the portal with the Grounding with Bing Custom Search tool attached). The hosted
+        // agent owns its model, instructions, and tools, so no client-side tool construction is needed -
+        // we resolve it by name (latest version unless AgentVersion is pinned) and run it as a standard
+        // MAF AIAgent. WebSearchAgent itself depends only on the MAF AIAgent abstraction.
+        services.AddSingleton<IWebSearchAgent>(sp =>
         {
             var options = sp.GetRequiredService<IOptions<WebSearchOptions>>().Value;
 
@@ -187,17 +188,17 @@ public static class ServiceCollectionExtensions
                 new Uri(options.ProjectEndpoint),
                 sp.GetRequiredService<TokenCredential>());
 
-            var bingTool = FoundryAITool.CreateBingCustomSearchTool(
-                new BingCustomSearchToolOptions(
-                [
-                    new BingCustomSearchConfiguration(options.ConnectionId, options.InstanceName)
-                ]));
-
-            AIAgent agent = projectClient.AsAIAgent(
-                options.ModelDeploymentName,
-                instructions: options.Instructions,
-                name: options.AgentName,
-                tools: [bingTool]);
+            AIAgent agent;
+            if (string.IsNullOrWhiteSpace(options.AgentVersion))
+            {
+                ProjectsAgentRecord record = projectClient.AgentAdministrationClient.GetAgent(options.AgentName);
+                agent = projectClient.AsAIAgent(record);
+            }
+            else
+            {
+                ProjectsAgentVersion version = projectClient.AgentAdministrationClient.GetAgentVersion(options.AgentName, options.AgentVersion);
+                agent = projectClient.AsAIAgent(version);
+            }
 
             // Retry transient Bing-grounding failures with exponential backoff + jitter and a per-attempt
             // timeout, mirroring ResilientChatClient. A single agent error still degrades gracefully:
@@ -214,12 +215,12 @@ public static class ServiceCollectionExtensions
                 .AddTimeout(TimeSpan.FromSeconds(options.RequestTimeoutSeconds))
                 .Build();
 
-            return new BingGroundingWebSearchAgent(
+            return new WebSearchAgent(
                 agent,
                 sp.GetRequiredService<IOptions<WebSearchOptions>>(),
                 sp.GetRequiredService<ISharedThrottle>(),
                 resilience,
-                sp.GetRequiredService<ILogger<BingGroundingWebSearchAgent>>());
+                sp.GetRequiredService<ILogger<WebSearchAgent>>());
         });
 
         // Loop composition + the MAF Cosmos checkpoint store.
