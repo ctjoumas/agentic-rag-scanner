@@ -41,7 +41,7 @@ internal static class WorkflowTestFactory
     public static TopicGroupPipeline CreatePipeline() =>
         new(
             new QuerySynthesisAgentStub(NullLogger<QuerySynthesisAgentStub>.Instance),
-            new BingSearchTool(NullLogger<BingSearchTool>.Instance),
+            new FakeBingSearchTool(),
             new PreFilterStep(NullLogger<PreFilterStep>.Instance),
             new FetchAndCleanStep(NullLogger<FetchAndCleanStep>.Instance),
             new RelevanceEvalAgentStub(NullLogger<RelevanceEvalAgentStub>.Instance),
@@ -77,5 +77,46 @@ internal static class WorkflowTestFactory
             Decision = LoopDecision.Retry,
             Items = items,
         };
+    }
+}
+
+/// <summary>
+/// Deterministic <see cref="IBingSearchTool"/> test double for the workflow pipeline tests. Returns a
+/// fixed set of canned, allowlist-scoped hits per query (no network), replacing the former production
+/// <c>BingSearchTool</c> stub that Epic 4 removed.
+/// </summary>
+internal sealed class FakeBingSearchTool : IBingSearchTool
+{
+    private const string DefaultAllowlistHost = "www.gov.uk";
+
+    public Task<IReadOnlyList<SearchHit>> SearchAsync(string query, RunContext run, CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<string> allowlist = run.AuthoritativeSources.Count > 0
+            ? run.AuthoritativeSources
+            : [DefaultAllowlistHost];
+
+        var slug = new string(query.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
+        if (slug.Length == 0)
+        {
+            slug = "q";
+        }
+
+        var hits = new List<SearchHit>(3);
+        for (var i = 0; i < 3; i++)
+        {
+            var source = allowlist[i % allowlist.Count];
+            var host = Uri.TryCreate(source, UriKind.Absolute, out var uri) ? uri.Host : source.Trim('/');
+            hits.Add(new SearchHit
+            {
+                Url = $"https://{host}/canned/{slug}/{i}",
+                Title = $"Canned result {i + 1} for '{query}'",
+                Snippet = $"Canned snippet for '{query}'.",
+                Domain = host,
+                SourceQuery = query,
+                Rank = i + 1,
+            });
+        }
+
+        return Task.FromResult<IReadOnlyList<SearchHit>>(hits);
     }
 }

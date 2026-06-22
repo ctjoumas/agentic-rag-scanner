@@ -31,7 +31,9 @@ public sealed class ScanOrchestrator : IScanOrchestrator
             RunId = runId,
             Jurisdiction = request.Jurisdiction,
             AsOfDate = request.AsOfDate,
-            // POC: the primary-source allowlist is supplied by Bing grounding config in Epic 3.
+            // The primary-source allowlist is enforced by the Web Search agent's Bing Custom Search
+            // configuration (Epic 4). RunContext.AuthoritativeSources stays empty here; when populated it
+            // adds a client-side, defense-in-depth host filter on top of that hosted scoping.
             AuthoritativeSources = [],
             StartedAtUtc = startedAtUtc,
         };
