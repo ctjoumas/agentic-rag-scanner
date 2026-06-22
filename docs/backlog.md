@@ -163,7 +163,7 @@ synonyms / avoid redundancy; agent decides query count; structured output + boun
 
 ---
 
-## Epic 4 — Web Search agent (Foundry, Grounding with Bing Custom Search) + deterministic pre-filter · `phase-4` · *L2 + L1/L3*
+## ✅ Epic 4 — Web Search agent (Foundry, Grounding with Bing Custom Search) + deterministic pre-filter · `phase-4` · *L2 + L1/L3* · **Complete**
 
 ### 4.1 — Web Search agent (Foundry agent w/ Grounding with Bing Custom Search), allowlist-scoped · `lane:L2-agents`
 **AC:**
