@@ -88,7 +88,7 @@ public sealed class TopicGroupPipeline
         var decision = await _relevanceEval.EvaluateAsync(context, documents, cancellationToken);
 
         // 6. Loop controller - records the pass Review and decides retry/finalize (honors maxLoops).
-        var loopDecision = _loopController.ReviewPass(context, documents, decision);
+        var loopDecision = await _loopController.ReviewPassAsync(context, documents, decision, cancellationToken);
 
         _logger.LogDebug(
             "Pipeline pass {Pass} for group '{GroupId}': {Hits} hit(s) -> {Decision}.",

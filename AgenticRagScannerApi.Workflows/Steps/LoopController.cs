@@ -8,11 +8,20 @@ namespace AgenticRagScannerApi.Workflows.Steps;
 /// <inheritdoc />
 public sealed class LoopController : ILoopController
 {
+    private readonly IFullTextStore _fullTextStore;
     private readonly ILogger<LoopController> _logger;
 
-    public LoopController(ILogger<LoopController> logger) => _logger = logger;
+    public LoopController(IFullTextStore fullTextStore, ILogger<LoopController> logger)
+    {
+        _fullTextStore = fullTextStore;
+        _logger = logger;
+    }
 
-    public LoopDecision ReviewPass(TopicGroupContext context, IReadOnlyList<FetchedDocument> documents, ReviewDecision decision)
+    public async Task<LoopDecision> ReviewPassAsync(
+        TopicGroupContext context,
+        IReadOnlyList<FetchedDocument> documents,
+        ReviewDecision decision,
+        CancellationToken cancellationToken = default)
     {
         var pass = context.History.CurrentPass
             ?? throw new InvalidOperationException("ReviewPass was called before the current pass was started.");
@@ -40,14 +49,18 @@ public sealed class LoopController : ILoopController
                 continue;
             }
 
-            var item = BuildResultItem(context, documents[verdict.Index], verdict, pass.Pass);
+            var document = documents[verdict.Index];
+            var item = BuildResultItem(context, document, verdict, pass.Pass);
 
             if (verdict.Verdict == Verdict.NotRelevant)
             {
+                // Discarded items are audit-only (never persisted to Cosmos), so we don't snapshot them.
                 review.Discarded.Add(item);
             }
             else
             {
+                // Carried item: snapshot exactly what the eval read to blob for audit/provenance.
+                await PersistFullTextAsync(item, document, cancellationToken);
                 review.Vetted.Add(item);
             }
         }
@@ -59,6 +72,18 @@ public sealed class LoopController : ILoopController
             context.TopicGroup.Id, pass.Pass, context.TopicGroup.MaxLoops, finalDecision, review.Vetted.Count, review.Discarded.Count);
 
         return finalDecision;
+    }
+
+    private async Task PersistFullTextAsync(ResultItem item, FetchedDocument document, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(document.CleanedText))
+        {
+            // Nothing to snapshot (fetch failed with no snippet); leave the reference null.
+            return;
+        }
+
+        item.FullTextBlobUri = await _fullTextStore.PersistAsync(
+            item.RunId, item.GroupId, item.Id, document.CleanedText, cancellationToken);
     }
 
     private static ResultItem BuildResultItem(TopicGroupContext context, FetchedDocument document, ItemVerdict verdict, int pass)

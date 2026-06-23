@@ -66,6 +66,32 @@ public class ScanOrchestratorTests
     }
 
     [Fact]
+    public async Task RunAsync_SplitsCommaSeparatedGroup_IntoOneContextWithKeywordOrList()
+    {
+        var captured = new List<TopicGroupContext>();
+        var orchestrator = new ScanOrchestrator(
+            CreateCapturingExecutor(captured),
+            Mock.Of<ILogger<ScanOrchestrator>>());
+
+        var request = new ScanRequest
+        {
+            AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Jurisdiction = "United Kingdom",
+            // One topic group expressed as a comma-separated list: extra whitespace and a
+            // case-insensitive duplicate ("Employee NIC") should be normalized away.
+            TopicGroups = ["Employee NIC,  Income Tax , ITEPA 2003 , employee nic"],
+        };
+
+        await orchestrator.RunAsync(request, CancellationToken.None);
+
+        captured.Should().HaveCount(1);
+        var group = captured[0].TopicGroup;
+        group.Keywords.Should().Equal("Employee NIC", "Income Tax", "ITEPA 2003");
+        group.Name.Should().Be("Employee NIC, Income Tax, ITEPA 2003");
+        group.Id.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
     public async Task RunAsync_WithNoTopicGroups_ReturnsEmptyAggregate_WithoutCallingExecutor()
     {
         var executor = new Mock<ITopicGroupExecutor>();

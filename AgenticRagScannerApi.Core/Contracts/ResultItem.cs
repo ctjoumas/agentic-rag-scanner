@@ -33,6 +33,13 @@ public sealed class ResultItem
     /// <summary>Primary source host/domain.</summary>
     public string? Domain { get; init; }
 
+    /// <summary>
+    /// Blob reference (path/URI) to the cleaned full text fetched at eval time.
+    /// Persisted to blob for audit/provenance: the live URL can change or 404, so we snapshot exactly
+    /// what the Relevance Eval agent read.
+    /// </summary>
+    public string? FullTextBlobUri { get; set; }
+
     // --- relevance (set in the loop) ---
 
     /// <summary>Three-way relevance verdict.</summary>
