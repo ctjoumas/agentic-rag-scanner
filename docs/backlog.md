@@ -181,7 +181,7 @@ synonyms / avoid redundancy; agent decides query count; structured output + boun
 
 ---
 
-## Epic 5 — Full-text fetch & clean + blob storage · `phase-5` · *L3 + L2*
+## ✅ Epic 5 — Full-text fetch & clean + blob storage · `phase-5` · *L3 + L2* · **Complete**
 
 ### 5.1 — `IAzureStorageService.UploadBlobAsync` (real) · `lane:L3-data-platform`
 **AC:** BlobServiceClient + `DefaultAzureCredential`; containers from options; returns blob URI.
