@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using AgenticRagScannerApi.Core.Runtime;
 using AgenticRagScannerApi.Models;
@@ -74,15 +76,23 @@ public sealed class ScanOrchestrator : IScanOrchestrator
     {
         var contexts = new List<TopicGroupContext>(topicGroups.Count);
 
-        foreach (var name in topicGroups)
+        foreach (var topicGroup in topicGroups)
         {
+            // Each request entry is one topic group expressed as a comma-separated list of
+            // keyword/synonym phrases. Split it into the keyword list so the whole group is
+            // processed as a single unit (one synthesized query per loop pass), not one topic at a time.
+            var keywords = SplitKeywords(topicGroup);
+            if (keywords.Count == 0)
+            {
+                continue;
+            }
+
+            var name = string.Join(", ", keywords);
             var group = new TopicGroup
             {
-                Id = ToGroupId(name),
+                Id = ToGroupId(keywords),
                 Name = name,
-                // POC: each selected group name becomes a single-phrase OR-list until curated
-                // keyword/synonym groups arrive (Epic 2/3).
-                Keywords = [name],
+                Keywords = keywords,
             };
 
             // TopicGroupContext seeds an empty SearchHistory on construction.
@@ -92,10 +102,45 @@ public sealed class ScanOrchestrator : IScanOrchestrator
         return contexts;
     }
 
-    /// <summary>Derives a stable, log-friendly slug id from a topic group name.</summary>
-    private static string ToGroupId(string name)
+    /// <summary>
+    /// Splits a comma-separated topic group into its keyword list: trims each phrase, drops blanks,
+    /// and removes case-insensitive duplicates while preserving first-seen order.
+    /// </summary>
+    private static IReadOnlyList<string> SplitKeywords(string topicGroup)
     {
-        var slug = Regex.Replace(name.Trim().ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
-        return slug.Length == 0 ? Guid.NewGuid().ToString("N") : slug;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var keywords = new List<string>();
+
+        foreach (var part in topicGroup.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (seen.Add(part))
+            {
+                keywords.Add(part);
+            }
+        }
+
+        return keywords;
+    }
+
+    /// <summary>
+    /// Derives a short, stable, log-friendly id for a topic group: a slug of the first keyword plus a
+    /// deterministic hash of the full (order-independent) keyword set. The hash keeps ids unique and
+    /// resume-stable across runs without slugging the entire comma-separated list into the id.
+    /// </summary>
+    private static string ToGroupId(IReadOnlyList<string> keywords)
+    {
+        var slug = Regex.Replace(keywords[0].ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+        if (slug.Length == 0)
+        {
+            slug = "group";
+        }
+
+        var normalized = string.Join(
+            '\n',
+            keywords.Select(k => k.ToLowerInvariant()).OrderBy(k => k, StringComparer.Ordinal));
+        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        var shortHash = Convert.ToHexString(hashBytes, 0, 4).ToLowerInvariant();
+
+        return $"{slug}-{shortHash}";
     }
 }

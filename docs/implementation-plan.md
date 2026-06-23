@@ -159,7 +159,8 @@ Legend: `? arch step N` traces to `architecture-context.md` §3. **DoD** = Defin
     `DiscardedResults[]` (primer §3)
   - `ResultItem` schema: source URL(s), `WhatItDoes`, impact area, regulator, tags, `Verdict`
     (`RELEVANT|BORDERLINE|NOT_RELEVANT`), `PublicationDate`, `EffectiveDate`, `AppliesFrom`,
-    `AppliesTo`, `DateConfidence`, level-of-authority, `Unverified`, `runId`, `groupId`, `version`
+    `AppliesTo`, `DateConfidence`, level-of-authority, `Unverified`, `FullTextBlobUri` (blob reference
+    to the persisted cleaned full text — Phase 5), `runId`, `groupId`, `version`
   - `Verdict`, `LevelOfAuthority` enums
 - [ ] **(L1)** Add shared **throttle** abstraction (`ISharedThrottle`/`IRateLimiter`) — no real limits yet.
 - [ ] **(L3)** Cross-cutting: OpenTelemetry skeleton (console exporter ok for now), options
@@ -316,13 +317,30 @@ its Bing Custom Search tool; duplicates (including across groups) removed; dead 
 **Tasks**
 - [ ] **(L3)** Implement `IAzureStorageService.UploadBlobAsync` (BlobServiceClient +
   `DefaultAzureCredential`); containers from options.
-- [ ] **(L2)** Fetch HTML/PDF, **strip boilerplate**; on failure **fall back to Bing summary +
-  flag `Unverified`** (do not drop — primer §3).
-- [ ] **(L3)** **SSRF guard:** allowlist enforcement, block private IPs, cap size/redirects/content-types.
-- [ ] **(L3)** Store cleaned text/artifacts to blob; reference URI on the `ResultItem`.
+- [ ] **(L2)** Fetch HTML/PDF, **strip boilerplate**; cleaned full text is held **in-memory** and
+  passed to the Relevance Eval agent (Phase 6); on failure **fall back to Bing summary +
+  flag `Unverified`** (do not drop — primer §3). Fetch & clean **never discards** on relevance —
+  discard happens only at eval (Phase 6).
+- [ ] **(L3)** **Fetch hygiene (not a full SSRF guard):** http/https-only scheme + caps on response
+  size, redirects, content-types, and per-fetch timeout. The full SSRF guard (host allowlist +
+  private/loopback IP blocking) is **deferred** — fetch targets are the customer's curated
+  primary-source (government) domains, already gated by Bing Custom Search. Tracked as an Epic 11
+  nice-to-have (backlog 11.6).
+- [ ] **(L3)** **Persist cleaned full text to blob (mandatory, audit).** Every fetched result URL's
+  cleaned full text is stored to blob (the live URL can change or 404, so snapshot exactly what eval
+  read). Store a **blob reference (path/URI)**, on `ResultItem.FullTextBlobUri`; keep the
+  container **private** and mint a short-lived **user-delegation SAS** on demand (or stream via RBAC) at
+  view time. Use a deterministic, idempotent key (e.g. `fulltext/{runId}/{groupId}/{itemId}.txt`).
 
-**DoD / demo:** cleaned full-text stored in blob; unreachable docs produce an `Unverified` item via
-summary fallback; SSRF guard rejects non-allowlisted hosts.
+> **Data-retention decision (resolved).** Full text **is** persisted — audit/provenance require an
+> immutable snapshot of what the agent read. It is stored in **blob, referenced** from the `ResultItem`,
+> **not inline** in Cosmos: Cosmos has a **2 MB item cap** (large HTML/PDF would hard-fail) and charges RU
+> proportional to body size on every read/list. The structured decision (`Verdict`, `EvalRationale`,
+> dates, `SourceUrls`, `FullTextBlobUri`) lives on the Cosmos `ResultItem` (Phase 8); the bytes live in
+> blob. The in-memory `SearchHistory`/`FetchedDocument` remain transient loop state.
+
+**DoD / demo:** cleaned full-text persisted to blob for every result URL and referenced on the
+`ResultItem`; unreachable docs produce an `Unverified` item via summary fallback.
 
 ---
 
@@ -341,6 +359,41 @@ summary fallback; SSRF guard rejects non-allowlisted hosts.
 - [ ] **(L1)** **Verdict routing** (real): BORDERLINE carried forward but flagged; NOT_RELEVANT
   dropped + logged for audit.
 - [ ] **(L3)** Verdict-distribution metric; eval-harness recall check on golden set.
+
+**Loop-feedback signal (design decision — build here, not before):** the eval agent must emit a
+**steer** for the next query-synthesis pass that distinguishes **two reasons to loop again**, because
+each wants a different next query:
+1. **Missing facet** — an aspect of the theme was never retrieved → next query **broadens** to introduce it.
+2. **Insufficient evidence** — the facet *was* covered, but the source is thin / secondary /
+   low-authority / out-of-date / ambiguous → next query **deepens or pivots** on the *same* facet
+   toward an authoritative primary source.
+
+**Two implementation options (decide at build time):**
+- **(A) Prose reasoning.** The eval prompt is instructed to write its `ThoughtProcess` in a defined
+  shape that names both kinds explicitly (e.g. *"Missing facets: X, Y — the next query must include
+  these. Facets P, Q are represented but evidence is weak because <reasons> — search for supplemental
+  authoritative sources on these."*). The v4 query-synthesis prompt **already consumes
+  `SearchHistory.Reviews`**, so this needs **no Core contract change** — but the query-synthesis prompt
+  must be extended with **explicit instructions on how to interpret that reasoning** (what the "Missing
+  facets" vs "weak evidence" phrasing means and how each should change the query). Cheapest path;
+  weaker guarantees (free text can drift).
+- **(B) Structured directives.** Add `IReadOnlyList<SearchDirective> Directives` to `ReviewDecision`,
+  each with **`Facet`** + a **`Reason`** enum (`MissingFacet | WeakEvidence | LowAuthority | Stale |
+  Ambiguous`) + optional **`Note`**. Stronger, machine-checkable, lets metrics count directive types.
+  Requires a Core contract change **and** the query-synthesis prompt must document **how the directives
+  are formatted and how to interpret each `Reason`** (render `MissingFacet` as a "broaden / introduce
+  these terms" instruction and the insufficiency reasons as a "deepen / find primary sources for this
+  facet" instruction).
+
+**Either way, the contract is shared:** whatever the eval emits (prose shape *or* directive list), the
+query-synthesis prompt must carry matching **interpretation instructions**, and the two must be versioned
+together so a change on one side never silently desyncs the other.
+
+**Decision:** Phase 6 ships **Option (A)** — the lower-risk prose route, no Core contract change. **Option
+(B)** (the structured `SearchDirective` list) is deferred as a **later-phase nice-to-have** (see Phase 11
+tuning), to be picked up only if eval prose proves unreliable in practice or once directive-type metrics
+are wanted. Do **not** add the `SearchDirective` Core field in Phase 5 or Phase 6 — there is no producer
+for it until (B) is actually scheduled.
 
 **DoD / demo:** items classified with verdicts + dates; loop exits per the rules; BORDERLINE items
 flagged and carried; NOT_RELEVANT logged.
@@ -369,7 +422,8 @@ plain-English impact summary.
   **level-of-authority stamping** (legislation > court ruling > HMRC guidance).
 - [ ] **(L3)** `ICosmosResultStore` (Microsoft.Azure.Cosmos + `DefaultAzureCredential`):
   **one versioned doc per item per run**; partition-key strategy (e.g. by jurisdiction or `runId`);
-  **idempotent** upsert (ETag/optimistic concurrency).
+  **idempotent** upsert (ETag/optimistic concurrency). The doc carries the **`FullTextBlobUri`
+  reference** (Phase 5), not the full text body — the bytes stay in blob (2 MB item cap + RU cost).
 - [ ] **(L3)** Reuse the **same Azure Cosmos account as the MAF checkpoint store** (see Phase 2) —
   separate containers for `checkpoints` vs `results`; one account, no emulator.
 
@@ -410,6 +464,11 @@ authority level stamped.
 - [ ] **(L1)** Load/throttle tuning to stay within TPM/RPM/QPS; backpressure verified.
 - [ ] **(L3)** App Insights **dashboards** (latency, tokens, verdict mix, failures); alerts.
 - [ ] **(All)** Security review (SSRF, secrets hygiene, least-privilege RBAC roles).
+- [ ] **(L2, nice-to-have)** **Loop-feedback Option (B):** upgrade the eval→query-synthesis steer from
+  Phase 6's prose (Option A) to a structured `IReadOnlyList<SearchDirective>` on `ReviewDecision`
+  (`Facet` + `Reason` enum + `Note`), with matching interpretation instructions in the query-synthesis
+  prompt and the two prompts versioned together. Only pursue if Phase 6 prose proves unreliable or
+  directive-type metrics are wanted. (See Phase 6.)
 
 **DoD / demo:** eval scores tracked over time; dashboards live; documented limits respected.
 

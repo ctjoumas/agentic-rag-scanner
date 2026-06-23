@@ -57,6 +57,7 @@ public static class ServiceCollectionExtensions
         services.AddOptions<QuerySynthesisOptions>().Bind(configuration.GetSection(QuerySynthesisOptions.SectionName)).ValidateDataAnnotations();
         services.AddOptions<CosmosOptions>().Bind(configuration.GetSection(CosmosOptions.SectionName)).ValidateDataAnnotations();
         services.AddOptions<WebSearchOptions>().Bind(configuration.GetSection(WebSearchOptions.SectionName)).ValidateDataAnnotations();
+        services.AddOptions<FetchOptions>().Bind(configuration.GetSection(FetchOptions.SectionName)).ValidateDataAnnotations();
 
         return services;
     }
@@ -172,8 +173,28 @@ public static class ServiceCollectionExtensions
         // Deterministic steps + the allowlist-gated web search agent (canned hits in Epic 2).
         services.AddSingleton<IPreFilterStep, PreFilterStep>();
         services.AddSingleton<IFetchAndCleanStep, FetchAndCleanStep>();
+        services.AddSingleton<IFullTextStore, FullTextStore>();
         services.AddSingleton<ILoopController, LoopController>();
         services.AddSingleton<IVerdictRouting, VerdictRouting>();
+
+        // Named HttpClient backing the Fetch & clean step (Epic 5, story 5.2). Auto-decompress and cap
+        // redirects per FetchOptions; the per-fetch timeout is enforced in the step (handler timeout
+        // disabled so it does not pre-empt the linked CancellationToken).
+        services.AddHttpClient(FetchAndCleanStep.HttpClientName, (sp, client) =>
+            {
+                client.Timeout = Timeout.InfiniteTimeSpan;
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("AgenticRagScanner/1.0");
+            })
+            .ConfigurePrimaryHttpMessageHandler(sp =>
+            {
+                var options = sp.GetRequiredService<IOptions<FetchOptions>>().Value;
+                return new SocketsHttpHandler
+                {
+                    AllowAutoRedirect = options.MaxRedirects > 0,
+                    MaxAutomaticRedirections = Math.Max(1, options.MaxRedirects),
+                    AutomaticDecompression = System.Net.DecompressionMethods.All,
+                };
+            });
 
         // Web Search agent (Epic 4, story 4.1): references the pre-provisioned hosted Foundry agent
         // (created in the portal with the Grounding with Bing Custom Search tool attached). The hosted

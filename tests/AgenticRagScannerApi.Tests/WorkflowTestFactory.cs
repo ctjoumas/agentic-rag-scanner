@@ -1,10 +1,13 @@
 using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
 using AgenticRagScannerApi.Workflows.Agents;
+using AgenticRagScannerApi.Workflows.Configuration;
 using AgenticRagScannerApi.Workflows.Pipeline;
 using AgenticRagScannerApi.Workflows.Steps;
 using AgenticRagScannerApi.Workflows.Tools;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using System.Net;
 
 namespace AgenticRagScannerApi.Tests;
 
@@ -43,9 +46,12 @@ internal static class WorkflowTestFactory
             new QuerySynthesisAgentStub(NullLogger<QuerySynthesisAgentStub>.Instance),
             new FakeWebSearchAgent(),
             new PreFilterStep(NullLogger<PreFilterStep>.Instance),
-            new FetchAndCleanStep(NullLogger<FetchAndCleanStep>.Instance),
+            new FetchAndCleanStep(
+                new StubHttpClientFactory(),
+                Options.Create(new FetchOptions()),
+                NullLogger<FetchAndCleanStep>.Instance),
             new RelevanceEvalAgentStub(NullLogger<RelevanceEvalAgentStub>.Instance),
-            new LoopController(NullLogger<LoopController>.Instance),
+            new LoopController(new StubFullTextStore(), NullLogger<LoopController>.Instance),
             new VerdictRouting(NullLogger<VerdictRouting>.Instance),
             new EnrichmentAgentStub(NullLogger<EnrichmentAgentStub>.Instance),
             new CategorizeAgentStub(NullLogger<CategorizeAgentStub>.Instance),
@@ -118,5 +124,51 @@ internal sealed class FakeWebSearchAgent : IWebSearchAgent
         }
 
         return Task.FromResult<IReadOnlyList<SearchHit>>(hits);
+    }
+}
+
+/// <summary>
+/// In-memory <see cref="IFullTextStore"/> for the pipeline tests: returns a deterministic fake blob
+/// reference (matching the production key) without touching Azure Storage, and records what it persisted.
+/// </summary>
+internal sealed class StubFullTextStore : IFullTextStore
+{
+    public List<(string RunId, string GroupId, string ItemId, string Text)> Persisted { get; } = [];
+
+    public Task<string> PersistAsync(string runId, string groupId, string itemId, string text, CancellationToken cancellationToken = default)
+    {
+        Persisted.Add((runId, groupId, itemId, text));
+        return Task.FromResult($"https://stub.blob.core.windows.net/documents/fulltext/{runId}/{groupId}/{itemId}.txt");
+    }
+}
+
+/// <summary>
+/// Offline <see cref="IHttpClientFactory"/> for the pipeline tests: returns canned HTML for any URL so
+/// the real <see cref="FetchAndCleanStep"/> exercises its fetch/clean path without touching the network.
+/// </summary>
+internal sealed class StubHttpClientFactory : IHttpClientFactory
+{
+    private readonly string _html;
+
+    public StubHttpClientFactory(string? html = null) =>
+        _html = html ?? "<html><body><main>Canned fetched body text.</main></body></html>";
+
+    public HttpClient CreateClient(string name) => new(new StubHandler(_html));
+
+    private sealed class StubHandler : HttpMessageHandler
+    {
+        private readonly string _html;
+
+        public StubHandler(string html) => _html = html;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(_html, System.Text.Encoding.UTF8, "text/html"),
+            };
+
+            return Task.FromResult(response);
+        }
     }
 }

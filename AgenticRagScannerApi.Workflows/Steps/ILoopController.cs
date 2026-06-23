@@ -14,7 +14,8 @@ public interface ILoopController
 {
     /// <summary>
     /// Records the review for the current pass and returns the loop decision. Assumes the current
-    /// pass has already been appended to <see cref="SearchHistory.Passes"/>.
+    /// pass has already been appended to <see cref="SearchHistory.Passes"/>. Carried items' cleaned
+    /// full text is snapshotted to blob storage as a side effect (provenance for the eval).
     /// </summary>
-    LoopDecision ReviewPass(TopicGroupContext context, IReadOnlyList<FetchedDocument> documents, ReviewDecision decision);
+    Task<LoopDecision> ReviewPassAsync(TopicGroupContext context, IReadOnlyList<FetchedDocument> documents, ReviewDecision decision, CancellationToken cancellationToken = default);
 }

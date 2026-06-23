@@ -52,7 +52,8 @@ place all projects reference.
 - `SearchHistory` (in-memory): `SearchQueries[]`, `VettedResults[]`, `DiscardedResults[]`.
 - `ResultItem` schema: source URL(s), `WhatItDoes`, impact area, regulator, tags, `Verdict`,
   `PublicationDate`, `EffectiveDate`, `AppliesFrom`, `AppliesTo`, `DateConfidence`, level-of-authority,
-  `Unverified`, `RunId`, `GroupId`, `Version`.
+  `Unverified`, `FullTextBlobUri` (blob reference to the persisted cleaned full text — Epic 5),
+  `RunId`, `GroupId`, `Version`.
 - `Verdict` and `LevelOfAuthority` enums.
 - Reviewed & approved by all 3 engineers before merge.
 `labels: user-story, needs-design` · **depends on:** 0.1 · **blocks:** Phases 1–10.
@@ -187,18 +188,34 @@ synonyms / avoid redundancy; agent decides query count; structured output + boun
 `labels: user-story, area:storage` · **depends on:** 0.5.
 
 ### 5.2 — Fetch & clean HTML/PDF with summary fallback · `lane:L2-agents`
-**AC:** fetch HTML/PDF, strip boilerplate; on failure fall back to Bing summary + flag `Unverified` (never drop).
+**AC:** fetch HTML/PDF, strip boilerplate; cleaned full text is held **in-memory** and passed to the
+Relevance Eval agent (Epic 6); on failure fall back to Bing summary + flag `Unverified` (never drop).
+Fetch & clean (Epic 5) **never discards** on relevance — discard happens only at eval (Epic 6).
 `labels: user-story` · **depends on:** 4.1.
 
-### 5.3 — SSRF guard on fetch · `lane:L3-data-platform`
-**AC:** allowlist enforced; private/loopback IPs blocked; caps on size/redirects/content-types; tested.
-`labels: user-story, area:security` · **depends on:** 5.2.
+### 5.3 — SSRF guard on fetch · `lane:L3-data-platform` · *deferred → 11.6*
+**Status:** deferred. The fetch targets are the customer's curated primary-source (government) domains,
+already gated by Grounding with Bing Custom Search, so the fetch step ships in 5.2 with only basic
+hygiene (http/https-only scheme + size/redirect/content-type/timeout caps). A full SSRF guard
+(host allowlist enforcement, private/loopback/link-local IP blocking) is a **nice-to-have** tracked as
+story **11.6**. `labels: user-story, area:security` · **depends on:** 5.2.
 
-### 5.4 — Persist cleaned artifacts to blob · `lane:L3-data-platform`
-**AC:** cleaned text/artifacts stored; blob URI referenced on the `ResultItem`.
-`labels: user-story, area:storage` · **depends on:** 5.1, 5.2.
+### 5.4 — Persist cleaned full text to blob (mandatory, audit) · `lane:L3-data-platform`
+**AC:**
+- **Mandatory:** every fetched search-result URL's cleaned full text is persisted to blob (audit/provenance —
+  the live URL can change or 404, so we snapshot exactly what eval read).
+- Store a **blob reference (path/URI)**, on `ResultItem.FullTextBlobUri`; the container
+  stays **private** and a short-lived **user-delegation SAS** is minted on demand (or bytes streamed via
+  RBAC) when the artifact is viewed.
+- Deterministic, idempotent blob key derived from `runId`/`groupId`/item id (e.g.
+  `fulltext/{runId}/{groupId}/{itemId}.txt`) so retries/re-runs don't duplicate.
+- The full text is **not** stored inline on the Cosmos doc (2 MB item cap + RU cost on every read); the
+  Cosmos `ResultItem` (Epic 8) carries the **reference + `EvalRationale`**, so the reasoning and the exact
+  source text can always be viewed together.
+`labels: user-story, area:storage, area:security` · **depends on:** 5.1, 5.2.
 
-**Epic demo:** cleaned full-text in blob; unreachable docs -> `Unverified` via fallback; SSRF guard rejects non-allowlisted hosts.
+**Epic demo:** cleaned full-text persisted to blob for every result URL and referenced on the `ResultItem`;
+unreachable docs -> `Unverified` via fallback.
 
 ---
 
@@ -218,6 +235,16 @@ effective vs tax-year dates -> fills date fields + `DateConfidence`; dates as si
 ### 6.4 — Verdict-distribution metric + recall check on golden set · `lane:L3-data-platform`
 **AC:** verdict mix emitted as a metric; eval-harness recall check runs on the golden dataset.
 `labels: user-story, area:observability` · **depends on:** 6.1.
+
+### 6.5 — Loop-feedback contract: eval steer → query synthesis (Option A / prose) · `lane:L2-agents`
+**AC:** the eval emits a next-pass steer that distinguishes **missing facet** (broaden) from
+**insufficient evidence on a covered facet** (deepen/pivot to an authoritative primary source).
+**Phase 6 ships Option (A):** structured `ThoughtProcess` **prose** — no Core contract change; v4 query
+synth already reads `SearchHistory.Reviews`. The query-synthesis prompt MUST be extended with explicit
+instructions on the steer's **shape and how to interpret each kind**, and the eval + query-synth prompts
+are **versioned together** so they never desync. The structured `SearchDirective` alternative (Option B)
+is deferred to Epic 11 as a nice-to-have. (See implementation-plan.md Phase 6.)
+`labels: user-story, area:llm` · **depends on:** 6.1, 3.3.
 
 **Epic demo:** items classified with verdicts + dates; loop exits per rules; BORDERLINE flagged/carried; NOT_RELEVANT logged.
 
@@ -302,6 +329,21 @@ Query Synthesis + Relevance Eval; distinct from per-run `SearchHistory`.
 **AC:** SSRF, secrets hygiene, least-privilege RBAC reviewed; findings tracked.
 `labels: user-story, area:security`.
 
+### 11.5 — Loop-feedback Option (B): structured `SearchDirective` steer · `lane:L2-agents` · *nice-to-have*
+**AC:** upgrade the eval→query-synthesis steer from Phase 6's prose (story 6.5 / Option A) to a structured
+`IReadOnlyList<SearchDirective>` on `ReviewDecision` — `Facet` + `Reason` enum
+`MissingFacet|WeakEvidence|LowAuthority|Stale|Ambiguous` + optional `Note`. The query-synthesis prompt
+gains matching interpretation instructions and the eval + query-synth prompts stay **versioned together**.
+**Only pursue** if Phase 6 prose proves unreliable in practice or directive-type metrics are wanted.
+`labels: user-story, area:llm` · **depends on:** 6.5.
+
+### 11.6 — SSRF guard on fetch (full) · `lane:L3-data-platform` · *nice-to-have*
+**AC:** harden the Fetch & clean step (story 5.2) beyond its basic scheme/size/redirect/content-type
+caps: enforce a primary-source host allowlist, resolve and block private/loopback/link-local/metadata
+IP ranges (incl. `169.254.169.254`) at connect time so redirects and DNS-rebinding are covered, and
+re-validate each redirect hop. **Only pursue** if fetch ever targets non-curated/user-supplied URLs,
+or as part of the 11.4 security review. `labels: user-story, area:security` · **depends on:** 5.2.
+
 ---
 
 ## Epic 12 — Fan-out & parallelization (MAF) · `phase-12` · *L1-led*
@@ -320,6 +362,11 @@ Query Synthesis + Relevance Eval; distinct from per-run `SearchHistory`.
 ### 12.3 — Load/throttle tuning under parallel load · `lane:L1-orchestration`
 **AC:** stays within TPM/RPM/QPS with N groups in flight; backpressure verified; per-group cap tuned and documented.
 `labels: user-story, area:maf` · **depends on:** 12.1, 11.2.
+
+### 12.4 — Decompose topic-group pass into per-step executors (mid-pass checkpointing + intra-group fan-out) · `lane:L1-orchestration` · `needs-design`
+**As an** engineer, **I want** each pipeline step modeled as its own MAF executor wired by edges (with a conditional loop-back from the Loop Controller), **so that** the run checkpoints **between steps** (resume mid-pass instead of replaying a whole pass) and the Fetch & Clean / Relevance Eval steps can fan out per document.
+**AC:** pass decomposed into per-step executors with a conditional loop-back edge; `SearchHistory` + per-step payloads checkpointed so a mid-pass failure resumes after the last completed step; Fetch & Clean fan-out/fan-in; per-step traces visible; existing pipeline tests pass (or are migrated). Design + trade-offs in **`docs/maf-executor-design.md`**.
+`labels: user-story, area:maf, needs-design` · **depends on:** 12.1 · *pairs with the same decomposition that enables 12.1.*
 
 **Epic demo:** the same pipeline that ran sequentially now runs topic groups **concurrently** under the throttle; throughput improves; the throttle caps active workers; parallel spans visible; cancellation still works.
 

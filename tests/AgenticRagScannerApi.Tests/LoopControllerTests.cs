@@ -14,10 +14,10 @@ namespace AgenticRagScannerApi.Tests;
 public class LoopControllerTests
 {
     [Fact]
-    public void ReviewPass_UnderCap_ReturnsRetry_AndMapsVerdicts()
+    public async Task ReviewPass_UnderCap_ReturnsRetry_AndMapsVerdicts()
     {
         var context = ArrangeWithCurrentPass(maxLoops: 3, priorPasses: 0);
-        var controller = new LoopController(NullLogger<LoopController>.Instance);
+        var controller = new LoopController(new StubFullTextStore(), NullLogger<LoopController>.Instance);
         var documents = new List<FetchedDocument>
         {
             WorkflowTestFactory.Doc("https://gov.uk/a"),
@@ -26,7 +26,7 @@ public class LoopControllerTests
         };
         var decision = WorkflowTestFactory.Decision(Verdict.Relevant, Verdict.Borderline, Verdict.NotRelevant);
 
-        var result = controller.ReviewPass(context, documents, decision);
+        var result = await controller.ReviewPassAsync(context, documents, decision);
 
         result.Should().Be(LoopDecision.Retry);
         var review = context.History.CurrentPass!.Review!;
@@ -35,17 +35,58 @@ public class LoopControllerTests
     }
 
     [Fact]
-    public void ReviewPass_AtCap_ReturnsFinalize_AndFlagsOverride()
+    public async Task ReviewPass_AtCap_ReturnsFinalize_AndFlagsOverride()
     {
         var context = ArrangeWithCurrentPass(maxLoops: 3, priorPasses: 2);
-        var controller = new LoopController(NullLogger<LoopController>.Instance);
+        var controller = new LoopController(new StubFullTextStore(), NullLogger<LoopController>.Instance);
         var documents = new List<FetchedDocument> { WorkflowTestFactory.Doc("https://gov.uk/a") };
         var decision = WorkflowTestFactory.Decision(Verdict.Relevant);
 
-        var result = controller.ReviewPass(context, documents, decision);
+        var result = await controller.ReviewPassAsync(context, documents, decision);
 
         result.Should().Be(LoopDecision.Finalize);
         context.History.CurrentPass!.Review!.DecisionOverride.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ReviewPass_SnapshotsCarriedFullText_ButNotDiscarded()
+    {
+        var context = ArrangeWithCurrentPass(maxLoops: 3, priorPasses: 0);
+        var store = new StubFullTextStore();
+        var controller = new LoopController(store, NullLogger<LoopController>.Instance);
+        var documents = new List<FetchedDocument>
+        {
+            WorkflowTestFactory.Doc("https://gov.uk/a"),
+            WorkflowTestFactory.Doc("https://gov.uk/b"),
+            WorkflowTestFactory.Doc("https://gov.uk/c"),
+        };
+        var decision = WorkflowTestFactory.Decision(Verdict.Relevant, Verdict.Borderline, Verdict.NotRelevant);
+
+        await controller.ReviewPassAsync(context, documents, decision);
+
+        // Only the two carried (Relevant/Borderline) items are snapshotted; the discarded one is not.
+        store.Persisted.Should().HaveCount(2);
+        var review = context.History.CurrentPass!.Review!;
+        review.Vetted.Should().OnlyContain(item => item.FullTextBlobUri != null);
+        review.Discarded.Should().OnlyContain(item => item.FullTextBlobUri == null);
+    }
+
+    [Fact]
+    public async Task ReviewPass_NoCleanedText_LeavesBlobReferenceNull()
+    {
+        var context = ArrangeWithCurrentPass(maxLoops: 3, priorPasses: 0);
+        var store = new StubFullTextStore();
+        var controller = new LoopController(store, NullLogger<LoopController>.Instance);
+        var documents = new List<FetchedDocument>
+        {
+            new() { Hit = new SearchHit { Url = "https://gov.uk/a", SourceQuery = "q" }, CleanedText = null },
+        };
+        var decision = WorkflowTestFactory.Decision(Verdict.Relevant);
+
+        await controller.ReviewPassAsync(context, documents, decision);
+
+        store.Persisted.Should().BeEmpty();
+        context.History.CurrentPass!.Review!.Vetted.Should().OnlyContain(item => item.FullTextBlobUri == null);
     }
 
     private static TopicGroupContext ArrangeWithCurrentPass(int maxLoops, int priorPasses)

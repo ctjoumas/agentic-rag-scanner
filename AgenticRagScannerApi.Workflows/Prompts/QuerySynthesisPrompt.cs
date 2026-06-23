@@ -11,7 +11,7 @@ namespace AgenticRagScannerApi.Workflows.Prompts;
 public static class QuerySynthesisPrompt
 {
     /// <summary>Prompt version - bump when the instructions change.</summary>
-    public const string Version = "v3";
+    public const string Version = "v4";
 
     /// <summary>
     /// Builds the system prompt: role and rules. The response shape is enforced by Structured Outputs
@@ -20,18 +20,29 @@ public static class QuerySynthesisPrompt
     public static string BuildSystemPrompt(string jurisdiction) =>
         $$"""
         You are a query-synthesis assistant for a regulatory horizon-scanning system.
-        Turn a curated topic group into a single focused web-search query that surfaces primary-source
+        Turn a curated topic group into a single web-search query that surfaces primary-source
         regulatory updates for the {{jurisdiction}} jurisdiction.
 
+        A topic group is ONE coherent theme expressed through many surface forms - synonyms, aliases,
+        and acronyms that co-occur on the same authoritative pages (for example NIC / National
+        Insurance Contributions, ITEPA 2003, PAYE, CIS, salary sacrifice all describe payroll
+        withholding). Treat the group as that single theme, not as separate unrelated topics.
+
         Rules:
-        - Produce exactly one query - the single best query for this pass.
-        - This runs in an agentic loop: if a pass underperforms, a later pass synthesizes another
-          query. So do NOT try to cover everything at once - pick the highest-value angle now.
-        - Target authoritative primary sources (government, regulators, legislation, official guidance).
-        - Rotate synonym and alias coverage across the topic group's keyword OR-list. Do NOT repeat a
-          query already tried in earlier passes - cover an untested synonym or gap instead.
-        - Keep the query concise, like a search box entry: no boolean operators, quotes, or site: filters.
-        - Prefer recency-oriented phrasing (for example "update" or "change") where it helps.
+        - Produce exactly one query that represents the WHOLE theme of the group. Do not drop part of
+          the group - name the most representative terms naturally so the search covers the theme.
+        - Write a concise natural-language query (~10-25 words), like a search-box entry. Do NOT use
+          boolean operators (AND/OR), quotes, or site: filters - web grounding ignores them and a long
+          OR-concatenation degrades ranking.
+        - You need not list every phrase verbatim: name the handful of most salient/representative
+          terms; the retriever generalizes from them to the rest of the cluster.
+        - Preserve named entities and acronyms exactly (for example ITEPA 2003, CIS, NIC, PAYE). Where
+          it aids recall, expand a key acronym to its full form alongside the acronym.
+        - Target authoritative primary sources (government, regulators, legislation, official guidance)
+          and prefer recency-oriented phrasing (for example "update", "change", "2026") where it helps.
+        - This runs in an agentic loop. On the FIRST pass, write a broad query for the whole theme. On
+          LATER passes, do not repeat an earlier query: use the prior queries and the reviewer's notes
+          to zoom into the facet that was under-covered, while staying within the same theme.
         """;
 
     /// <summary>Builds the user prompt: the topic group, pass number, keyword OR-list, and prior queries.</summary>
@@ -51,16 +62,26 @@ public static class QuerySynthesisPrompt
         }
 
         var priorQueries = context.History.Queries.ToList();
-        builder.AppendLine("Queries already tried (avoid repeating; rotate to untested synonyms/gaps):");
+        builder.AppendLine("Queries already tried (do not repeat; cover the same theme from an angle that fills a gap):");
         if (priorQueries.Count == 0)
         {
-            builder.AppendLine("- (none yet - this is the first pass)");
+            builder.AppendLine("- (none yet - this is the first pass; write a broad query for the whole theme)");
         }
         else
         {
             foreach (var query in priorQueries)
             {
                 builder.AppendLine($"- {query}");
+            }
+        }
+
+        var priorReviews = context.History.Reviews.ToList();
+        if (priorReviews.Count > 0)
+        {
+            builder.AppendLine("Reviewer notes from earlier passes (what was found and what is still missing - steer toward the gaps):");
+            foreach (var review in priorReviews)
+            {
+                builder.AppendLine($"- {review}");
             }
         }
 
