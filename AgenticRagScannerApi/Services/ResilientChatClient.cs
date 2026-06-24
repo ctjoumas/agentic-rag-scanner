@@ -6,6 +6,7 @@ using Azure;
 using Microsoft.Extensions.AI;
 using Polly;
 using Polly.Retry;
+using Polly.Timeout;
 
 namespace AgenticRagScannerApi.Services;
 
@@ -77,6 +78,9 @@ public sealed class ResilientChatClient : DelegatingChatClient
         RequestFailedException requestFailed => requestFailed.Status is 0 or 408 or 429 or >= 500,
         HttpRequestException => true,
         TimeoutException => true,
+        // Polly's per-attempt timeout (does NOT derive from System.TimeoutException); retrying gives the
+        // call a fresh attempt instead of letting a single slow request abort the operation.
+        TimeoutRejectedException => true,
         _ => false,
     };
 }
