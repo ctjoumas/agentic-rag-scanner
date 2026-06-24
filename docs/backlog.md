@@ -219,10 +219,10 @@ unreachable docs -> `Unverified` via fallback.
 
 ---
 
-## 🟦 Epic 6 — Relevance eval (3-verdict, date-aware) + real loop controller · `phase-6` · *L2 + L1* · **Core complete**
+## ✅ Epic 6 — Relevance eval (3-verdict, date-aware) + real loop controller · `phase-6` · *L2 + L1* · **Complete**
 > 6.1, 6.2, 6.5 and the new 6.6 are **done** (real full-text eval + real loop/verdict routing + prose
 > loop-feedback steer + per-pass history surfaced on the result/API). **6.4** (verdict-distribution
-> metric + golden-set recall harness) is **still outstanding** and folds into Epic 11's evals/observability.
+> metric + golden-set recall harness) is **deferred** and folds into Epic 11's evals/observability.
 
 ### 6.1 — Relevance Eval Agent (real, full-text, date-aware) · `lane:L2-agents` · **✅ Done**
 **AC:** single full-text call -> `RELEVANT/BORDERLINE/NOT_RELEVANT`; distinguishes publication vs
@@ -237,9 +237,9 @@ effective vs tax-year dates -> fills date fields + `DateConfidence`; dates as si
 > **Note:** the recall override fires at **≥80%** RELEVANT (boundary inclusive, matching the reference
 > implementation); the per-group cap check (`LoopCount >= MaxLoops`) is evaluated first and always finalizes.
 
-### 6.4 — Verdict-distribution metric + recall check on golden set · `lane:L3-data-platform` · **⏳ Outstanding**
+### 6.4 — Verdict-distribution metric + recall check on golden set · `lane:L3-data-platform` · *deferred → 11.1 / 11.3*
 **AC:** verdict mix emitted as a metric; eval-harness recall check runs on the golden dataset.
-**Status:** not yet built — there is no verdict-distribution *metric* nor a golden dataset / recall
+**Status:** deferred. There is no verdict-distribution *metric* nor a golden dataset / recall
 harness in the repo yet (verdict routing only *logs* counts today). Tracked to land with the Epic 11
 eval suite + observability dashboards (11.1 / 11.3).
 `labels: user-story, area:observability` · **depends on:** 6.1.
