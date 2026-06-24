@@ -2,7 +2,7 @@ namespace AgenticRagScannerApi.Core.Contracts;
 
 /// <summary>
 /// Structured output of the relevance-eval / review agent for ONE pass (transient).
-/// The loop controller applies the accuracy override, and the service maps this into the pass's
+/// The loop controller applies the recall override, and the service maps this into the pass's
 /// recorded Review. Mirrors the reference repo's ReviewDecision.
 /// </summary>
 public sealed class ReviewDecision

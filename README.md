@@ -41,13 +41,19 @@ search QPS limits):
 Auditor Request (date + jurisdiction + topic groups)
    └─ Fan-out by topic group → N MAF workflows (shared throttle)
         ── Agentic RAG loop (per group, default maxLoops = 3) ──
-        1. Query Synthesis Agent     synthesize focused queries from the keyword set;
-                                      uses in-memory search history to avoid redundancy
+        1. Query Synthesis Agent     synthesize focused queries from the keyword set; uses in-memory
+                                      search history to avoid redundancy, and the previous pass's
+                                      reviewer steer (broaden for missing facets vs. deepen/pivot)
         2. Web Search Agent (Bing)   search restricted to the primary-source allowlist
         3. Deterministic Pre-filter  dedupe (incl. cross-group) + URL reachability
         4. Full-text Fetch & Clean   HTML/PDF, strip boilerplate; fallback + flag "unverified"
-        5. Relevance Eval Agent       single LLM call → RELEVANT / BORDERLINE / NOT_RELEVANT
-        6. Loop Controller            re-loop if under maxLoops & goal unmet, or >80% RELEVANT
+        5. Relevance Eval Agent       single full-text, date-aware LLM call →
+                                      RELEVANT / BORDERLINE / NOT_RELEVANT, extracting publication /
+                                      effective / applies-from-to dates and a loop-feedback steer
+        6. Loop Controller            route per-item verdicts (vetted vs. discarded), snapshot each
+                                      carried item's cleaned full text to blob for provenance; re-loop
+                                      while under maxLoops if the goal is unmet or a pass is
+                                      ≥80% RELEVANT (recall override — a rich vein implies more to find)
         ── Routing & enrichment ──
         7. Content Analysis / Enrichment   whatItDoes summary + metadata
         8. Categorize Agent                impact area, regulator, approved tags
@@ -138,10 +144,12 @@ Cognitive Services roles).
 
    - `Foundry` — Foundry endpoint + model deployment name (downstream MAF agents)
    - `WebSearch` — Foundry project endpoint + the name of the pre-provisioned Web Search
-     agent (optionally a pinned `AgentVersion`)
+     agent (optionally a pinned `AgentVersion`), plus `MaxResults` and `RequestTimeoutSeconds`
    - `Cosmos` — account endpoint, database, and checkpoints container
    - `AzureStorage` — blob service URI + container names (`documents`, `exports`)
    - `AzureSearch` — search endpoint + index name (planned memory store)
+   - `Fetch` — full-text fetch limits (allowed content types, max response size,
+     max redirects, request timeout)
    - `ApplicationInsights` — connection string (optional)
 
 ### Build & run
@@ -183,10 +191,13 @@ dotnet test AgenticRagScannerApi.sln
 
 ## Project status
 
-The solution is delivered in phased epics tracked in [docs/backlog.md](docs/backlog.md). Epics 0–4
-(foundations & contracts, run lifecycle, MAF scaffolding, the first real Foundry agent, and the
-Web Search agent) are complete; later epics cover full-text fetch, evaluation, enrichment,
-persistence, and the future memory/review loop.
+The solution is delivered in phased epics tracked in [docs/backlog.md](docs/backlog.md). Epics 0–6 are
+complete — foundations & contracts, run lifecycle, MAF scaffolding, the first real Foundry agent, the
+Web Search agent, full-text fetch & clean with blob storage, and the **date-aware, three-verdict
+relevance evaluation with the real loop controller** (per-item verdict routing, full-text provenance
+snapshots, a ≥80%-RELEVANT recall override, and a loop-feedback steer back into query synthesis).
+Later epics cover enrichment & categorization, quality gates + Cosmos persistence, publish/export,
+and the future memory/review loop.
 
 ## License
 

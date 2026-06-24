@@ -7,6 +7,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly;
+using Polly.Timeout;
 
 namespace AgenticRagScannerApi.Workflows.Tools;
 
@@ -122,6 +123,16 @@ public sealed class WebSearchAgent : IWebSearchAgent
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (TimeoutRejectedException)
+        {
+            // Expected, handled condition: the hosted agent didn't respond within the per-attempt
+            // timeout. The loop controller proceeds without these hits, so log a concise warning
+            // (not the full transport stack trace) and degrade gracefully.
+            _logger.LogWarning(
+                "WebSearch: query '{Query}' timed out after the configured per-request timeout; returning no hits.",
+                query);
+            return [];
         }
         catch (Exception ex)
         {

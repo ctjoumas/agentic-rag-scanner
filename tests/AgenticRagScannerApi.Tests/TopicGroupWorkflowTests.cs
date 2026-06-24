@@ -45,5 +45,11 @@ public class TopicGroupWorkflowTests
         result.Status.Should().Be("Completed");
         result.Items.Should().NotBeEmpty();
         checkpoints.Should().BeGreaterThan(0);
+
+        // The full per-pass history is surfaced on the result (and so flows out through the API to a
+        // future developer UI): one recorded pass per loop, each with its query and review.
+        result.History.Should().NotBeNull();
+        result.History!.Passes.Should().HaveCount(result.LoopCount);
+        result.History.Passes.Should().OnlyContain(p => !string.IsNullOrWhiteSpace(p.Query) && p.Review != null);
     }
 }

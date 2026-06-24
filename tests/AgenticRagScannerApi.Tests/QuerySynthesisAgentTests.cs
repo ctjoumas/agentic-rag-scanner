@@ -19,13 +19,14 @@ public class QuerySynthesisAgentTests
     [Fact]
     public async Task SynthesizeAsync_ReturnsStructuredQuery()
     {
-        var chat = new FakeChatClient("""{"query":"uk advisory fuel rates update"}""");
+        var chat = new FakeChatClient("""{"query":"uk advisory fuel rates update","rationale":"broad first-pass query covering the whole theme"}""");
         var agent = CreateAgent(chat);
         var context = WorkflowTestFactory.CreateContext();
 
-        var query = await agent.SynthesizeAsync(context);
+        var result = await agent.SynthesizeAsync(context);
 
-        query.Should().Be("uk advisory fuel rates update");
+        result.Query.Should().Be("uk advisory fuel rates update");
+        result.Rationale.Should().Be("broad first-pass query covering the whole theme");
         chat.CallCount.Should().Be(1);
     }
 
@@ -36,9 +37,9 @@ public class QuerySynthesisAgentTests
         var agent = CreateAgent(chat, new QuerySynthesisOptions { MaxAttempts = 2 });
         var context = WorkflowTestFactory.CreateContext();
 
-        var query = await agent.SynthesizeAsync(context);
+        var result = await agent.SynthesizeAsync(context);
 
-        query.Should().Be("recovered query");
+        result.Query.Should().Be("recovered query");
         chat.CallCount.Should().Be(2);
     }
 
@@ -49,9 +50,10 @@ public class QuerySynthesisAgentTests
         var agent = CreateAgent(chat, new QuerySynthesisOptions { MaxAttempts = 2 });
         var context = WorkflowTestFactory.CreateContext(name: "Advisory Fuel Rates");
 
-        var query = await agent.SynthesizeAsync(context);
+        var result = await agent.SynthesizeAsync(context);
 
-        query.Should().Contain("Advisory Fuel Rates").And.Contain("update");
+        result.Query.Should().Contain("Advisory Fuel Rates").And.Contain("update");
+        result.Rationale.Should().NotBeNullOrWhiteSpace();
         chat.CallCount.Should().Be(2);
     }
 
