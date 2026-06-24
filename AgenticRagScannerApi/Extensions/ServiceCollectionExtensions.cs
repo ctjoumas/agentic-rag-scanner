@@ -28,7 +28,6 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Retry;
-using Polly.Timeout;
 using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
 using System.ClientModel;
 
@@ -263,9 +262,6 @@ public static class ServiceCollectionExtensions
         RequestFailedException requestFailed => requestFailed.Status is 0 or 408 or 429 or >= 500,
         HttpRequestException => true,
         TimeoutException => true,
-        // Polly's per-attempt timeout (does NOT derive from System.TimeoutException); retrying gives the
-        // Web Search agent a fresh attempt instead of aborting on a single slow Bing-grounding call.
-        TimeoutRejectedException => true,
         _ => false,
     };
 
