@@ -12,5 +12,12 @@ namespace AgenticRagScannerApi.Workflows.Agents;
 public interface IQuerySynthesisAgent
 {
     /// <summary>Synthesizes a single non-redundant query for the current pass.</summary>
-    Task<string> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default);
+    Task<QuerySynthesisResult> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// The synthesized query for a pass plus the model's brief rationale for choosing it (why this query,
+/// and on re-loops how it differs from earlier passes). <see cref="Rationale"/> is null when the model
+/// omits it. Recorded on <see cref="LoopPass.QueryRationale"/> for observability.
+/// </summary>
+public sealed record QuerySynthesisResult(string Query, string? Rationale);

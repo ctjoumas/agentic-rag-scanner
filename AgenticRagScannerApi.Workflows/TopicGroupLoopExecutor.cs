@@ -59,6 +59,7 @@ public sealed class TopicGroupLoopExecutor : Executor<PassSignal>
             Status = "Completed",
             LoopCount = _context.LoopCount,
             Items = items,
+            History = SearchHistorySerializer.ToSnapshot(_context.History),
         };
 
         _logger.LogInformation(

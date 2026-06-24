@@ -84,6 +84,21 @@ internal static class WorkflowTestFactory
             Items = items,
         };
     }
+
+    /// <summary>Like <see cref="Decision(Verdict[])"/> but with an explicit raw eval loop decision.</summary>
+    public static ReviewDecision DecisionWith(LoopDecision decision, params Verdict[] verdicts)
+    {
+        var items = verdicts
+            .Select((verdict, index) => new ItemVerdict { Index = index, Verdict = verdict, Rationale = "r" })
+            .ToList();
+
+        return new ReviewDecision
+        {
+            ThoughtProcess = "stub",
+            Decision = decision,
+            Items = items,
+        };
+    }
 }
 
 /// <summary>

@@ -5,10 +5,12 @@ using AgenticRagScannerApi.Workflows.Pipeline;
 namespace AgenticRagScannerApi.Workflows.Steps;
 
 /// <summary>
-/// Deterministic loop controller (stub for Epic 2). After the relevance eval runs for a pass, it
-/// records the pass <see cref="Review"/> (mapping per-item verdicts to vetted/discarded items) and
-/// decides whether to loop again, honoring the per-group <see cref="TopicGroup.MaxLoops"/> cap. The
-/// real controller (Epic 6) adds the goal-coverage and &gt;80%-relevant accuracy override.
+/// Deterministic loop controller. After the relevance eval runs for a pass, it records the pass
+/// <see cref="Review"/> (mapping per-item verdicts to vetted/discarded items) and decides whether to
+/// loop again. The real policy (Epic 6, story 6.2) honors the per-group <see cref="TopicGroup.MaxLoops"/>
+/// cap, respects the eval agent's goal-met judgement below the cap, and applies the >80% RELEVANT
+/// recall override: when the eval wants to finalize but the pass was RELEVANT-rich, it loops again
+/// (subject to the cap) on the assumption there is more primary-source material still to find.
 /// </summary>
 public interface ILoopController
 {

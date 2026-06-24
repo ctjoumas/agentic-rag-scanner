@@ -219,24 +219,32 @@ unreachable docs -> `Unverified` via fallback.
 
 ---
 
-## Epic 6 — Relevance eval (3-verdict, date-aware) + real loop controller · `phase-6` · *L2 + L1*
+## 🟦 Epic 6 — Relevance eval (3-verdict, date-aware) + real loop controller · `phase-6` · *L2 + L1* · **Core complete**
+> 6.1, 6.2, 6.5 and the new 6.6 are **done** (real full-text eval + real loop/verdict routing + prose
+> loop-feedback steer + per-pass history surfaced on the result/API). **6.4** (verdict-distribution
+> metric + golden-set recall harness) is **still outstanding** and folds into Epic 11's evals/observability.
 
-### 6.1 — Relevance Eval Agent (real, full-text, date-aware) · `lane:L2-agents`
+### 6.1 — Relevance Eval Agent (real, full-text, date-aware) · `lane:L2-agents` · **✅ Done**
 **AC:** single full-text call -> `RELEVANT/BORDERLINE/NOT_RELEVANT`; distinguishes publication vs
 effective vs tax-year dates -> fills date fields + `DateConfidence`; dates as signal, not hard filter.
 `labels: user-story, area:llm` · **depends on:** 3.1, 5.2.
 
-### 6.2 — Loop Controller + Verdict Routing (real) · `lane:L1-orchestration`
+### 6.2 — Loop Controller + Verdict Routing (real) · `lane:L1-orchestration` · **✅ Done**
 **AC:**
-- Loop Controller: re-loop if under `maxLoops` AND goal unmet, OR override if a pass is >80% RELEVANT; `maxLoops` tunable per topic group; `SearchHistory` updated each pass.
+- Loop Controller: re-loop if under `maxLoops` AND goal unmet, OR override if a pass is **≥80% RELEVANT**; `maxLoops` tunable per topic group; `SearchHistory` updated each pass.
 - Verdict Routing: BORDERLINE carried forward but flagged in the data structure; NOT_RELEVANT dropped + logged.
 `labels: user-story, area:maf` · **depends on:** 6.1, 2.3 · *(merged: former 6.2 + 6.3)*
+> **Note:** the recall override fires at **≥80%** RELEVANT (boundary inclusive, matching the reference
+> implementation); the per-group cap check (`LoopCount >= MaxLoops`) is evaluated first and always finalizes.
 
-### 6.4 — Verdict-distribution metric + recall check on golden set · `lane:L3-data-platform`
+### 6.4 — Verdict-distribution metric + recall check on golden set · `lane:L3-data-platform` · **⏳ Outstanding**
 **AC:** verdict mix emitted as a metric; eval-harness recall check runs on the golden dataset.
+**Status:** not yet built — there is no verdict-distribution *metric* nor a golden dataset / recall
+harness in the repo yet (verdict routing only *logs* counts today). Tracked to land with the Epic 11
+eval suite + observability dashboards (11.1 / 11.3).
 `labels: user-story, area:observability` · **depends on:** 6.1.
 
-### 6.5 — Loop-feedback contract: eval steer → query synthesis (Option A / prose) · `lane:L2-agents`
+### 6.5 — Loop-feedback contract: eval steer → query synthesis (Option A / prose) · `lane:L2-agents` · **✅ Done**
 **AC:** the eval emits a next-pass steer that distinguishes **missing facet** (broaden) from
 **insufficient evidence on a covered facet** (deepen/pivot to an authoritative primary source).
 **Phase 6 ships Option (A):** structured `ThoughtProcess` **prose** — no Core contract change; v4 query
@@ -246,7 +254,21 @@ are **versioned together** so they never desync. The structured `SearchDirective
 is deferred to Epic 11 as a nice-to-have. (See implementation-plan.md Phase 6.)
 `labels: user-story, area:llm` · **depends on:** 6.1, 3.3.
 
-**Epic demo:** items classified with verdicts + dates; loop exits per rules; BORDERLINE flagged/carried; NOT_RELEVANT logged.
+### 6.6 — Surface full per-pass history on the result + API (for a future developer UI) · `lane:L1-orchestration` · **✅ Done**
+**As a** developer, **I want** the whole agentic-RAG loop history returned with the run, **so that** a
+future UI can replay every pass — query + rationale, the hits retrieved, and the review (thought process,
+LLM-vs-final decision, override + reason, and the vetted vs. discarded items with URLs, verdicts,
+rationale, and dates).
+**AC:**
+- `TopicGroupResult.History` (`SearchHistorySnapshot?`, nullable) carries the per-pass snapshot; populated
+  by `TopicGroupLoopExecutor` on finalize from the in-memory `SearchHistory` (null for the Phase 1 stub).
+- The snapshot DTOs (`SearchHistorySnapshot` / `LoopPassSnapshot` / `ReviewSnapshot`) live in **Core** so
+  the result can reference them, and are reused by the MAF checkpoint serializer.
+- Flows out through the API unchanged: `ScannerController` returns `ScanResult` whose `Groups[].History`
+  serializes in the HTTP response (the `DateOnly?` date fields use the registered `DateOnlyJsonConverter`).
+`labels: user-story, area:maf` · **depends on:** 6.2.
+
+**Epic demo:** items classified with verdicts + dates; loop exits per rules; BORDERLINE flagged/carried; NOT_RELEVANT logged; the run's response includes the full per-pass history for every topic group.
 
 ---
 

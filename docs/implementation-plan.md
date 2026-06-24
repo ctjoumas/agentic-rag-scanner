@@ -348,17 +348,25 @@ its Bing Custom Search tool; duplicates (including across groups) removed; dead 
 **Goal:** the core compliance decision + loop exit logic. `? arch steps 9–11`
 
 **Tasks**
-- [ ] **(L2)** **Relevance Eval Agent** (real): single LLM call over **full text**;
+- [x] **(L2)** **Relevance Eval Agent** (real): single LLM call over **full text**;
   `RELEVANT|BORDERLINE|NOT_RELEVANT`; **effective-date aware** (publication vs effective/in-force vs
   tax-year applicability) ? fills `PublicationDate`/`EffectiveDate`/`AppliesFrom`/`AppliesTo`/
-  `DateConfidence`; dates as a **signal, not a hard filter** (primer §3).
-- [ ] **(L1)** **Loop controller** (real): re-loop if under `maxLoops` **and** goal unmet, **or
-  override** if a pass returns **>80% RELEVANT**; update `SearchHistory` each pass. `maxLoops` is
+  `DateConfidence`; dates as a **signal, not a hard filter** (primer §3). *(`RelevanceEvalAgent`,
+  prompt **v2**; conservative all-BORDERLINE + RETRY fallback on model failure.)*
+- [x] **(L1)** **Loop controller** (real): re-loop if under `maxLoops` **and** goal unmet, **or
+  override** if a pass returns **≥80% RELEVANT**; update `SearchHistory` each pass. `maxLoops` is
   **tunable per topic group** — larger synonym-heavy groups (e.g. Miscellaneous / IR35) may use a
   higher cap so synthesis can rotate coverage across more passes; small groups stay at 3 or lower.
-- [ ] **(L1)** **Verdict routing** (real): BORDERLINE carried forward but flagged; NOT_RELEVANT
-  dropped + logged for audit.
+  *(`Steps/LoopController.cs`; the cap check finalizes first; the override boundary is inclusive — `>= 0.80`.)*
+- [x] **(L1)** **Verdict routing** (real): BORDERLINE carried forward but flagged; NOT_RELEVANT
+  dropped + logged for audit. *(`Steps/VerdictRouting.cs`.)*
+- [x] **(L1)** **Surface per-pass history on the result + API:** `TopicGroupResult.History`
+  (`SearchHistorySnapshot?`) is populated on finalize from the in-memory `SearchHistory` and flows out
+  unchanged through `ScanResult` → `ScannerController` so a future developer UI can replay each pass
+  (see backlog 6.6).
 - [ ] **(L3)** Verdict-distribution metric; eval-harness recall check on golden set.
+  *(**Outstanding** — no verdict-distribution metric or golden dataset / recall harness yet; folds into
+  the Phase 11 eval suite + dashboards.)*
 
 **Loop-feedback signal (design decision — build here, not before):** the eval agent must emit a
 **steer** for the next query-synthesis pass that distinguishes **two reasons to loop again**, because

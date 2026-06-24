@@ -23,4 +23,12 @@ public sealed class TopicGroupResult
 
     /// <summary>Vetted items surfaced for this group (empty for the Phase 1 stub).</summary>
     public IReadOnlyList<ResultItem> Items { get; init; } = [];
+
+    /// <summary>
+    /// Full per-pass history of the agentic RAG loop for this group: each pass's query and rationale,
+    /// the hits it retrieved, and the review (thought process, LLM vs. final decision, any override and
+    /// its reason, plus the vetted and discarded items). Lets a developer UI peek into every pass.
+    /// Null for the Phase 1 stub, which runs no workflow loop.
+    /// </summary>
+    public SearchHistorySnapshot? History { get; init; }
 }

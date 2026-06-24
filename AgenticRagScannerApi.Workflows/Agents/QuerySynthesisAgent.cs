@@ -39,7 +39,7 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
         _logger = logger;
     }
 
-    public async Task<string> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
+    public async Task<QuerySynthesisResult> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
     {
         var pass = context.LoopCount + 1;
         var systemPrompt = QuerySynthesisPrompt.BuildSystemPrompt(context.Run.Jurisdiction);
@@ -57,13 +57,13 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
 
         for (var attempt = 1; attempt <= _options.MaxAttempts; attempt++)
         {
-            var query = await TrySynthesizeOnceAsync(agent, userPrompt, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(query))
+            var result = await TrySynthesizeOnceAsync(agent, userPrompt, cancellationToken);
+            if (result is not null)
             {
                 _logger.LogInformation(
                     "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}: query synthesized on attempt {Attempt}.",
                     QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass, attempt);
-                return query;
+                return result;
             }
 
             _logger.LogWarning(
@@ -80,10 +80,10 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
 
     /// <summary>
     /// Calls the model once using Structured Outputs (a strict JSON schema generated from
-    /// <see cref="QueryResult"/>) and returns the trimmed query, or <see langword="null"/> when the model
-    /// refuses or returns a blank / unparseable result.
+    /// <see cref="QueryResult"/>) and returns the trimmed query plus its rationale, or
+    /// <see langword="null"/> when the model refuses or returns a blank / unparseable result.
     /// </summary>
-    private async Task<string?> TrySynthesizeOnceAsync(ChatClientAgent agent, string userPrompt, CancellationToken cancellationToken)
+    private async Task<QuerySynthesisResult?> TrySynthesizeOnceAsync(ChatClientAgent agent, string userPrompt, CancellationToken cancellationToken)
     {
         try
         {
@@ -93,7 +93,13 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
                 cancellationToken: cancellationToken);
 
             var query = response.Result.Query?.Trim();
-            return string.IsNullOrWhiteSpace(query) ? null : query;
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                return null;
+            }
+
+            var rationale = response.Result.Rationale?.Trim();
+            return new QuerySynthesisResult(query, string.IsNullOrWhiteSpace(rationale) ? null : rationale);
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
@@ -102,13 +108,17 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
     }
 
     /// <summary>Deterministic single-query fallback derived from the topic group's keywords.</summary>
-    private static string BuildFallbackQuery(TopicGroupContext context)
+    private static QuerySynthesisResult BuildFallbackQuery(TopicGroupContext context)
     {
         var keywords = context.TopicGroup.Keywords;
         var primary = keywords.Count > 0 ? keywords[0] : context.TopicGroup.Name;
-        return $"{primary} {context.Run.Jurisdiction} update";
+        var query = $"{primary} {context.Run.Jurisdiction} update";
+        return new QuerySynthesisResult(
+            query,
+            "Deterministic keyword fallback: the model returned no usable query, so the topic group's primary keyword was used.");
     }
 
     private sealed record QueryResult(
-        [property: JsonPropertyName("query")] string? Query);
+        [property: JsonPropertyName("query")] string? Query,
+        [property: JsonPropertyName("rationale")] string? Rationale);
 }
