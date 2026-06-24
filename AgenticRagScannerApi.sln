@@ -13,6 +13,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgenticRagScannerApi.Core",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgenticRagScannerApi.Workflows", "AgenticRagScannerApi.Workflows\AgenticRagScannerApi.Workflows.csproj", "{136C17A2-BFD5-46F6-9AEB-6777377C7A1D}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "infra", "infra", "{30258541-D0D8-F3FD-D559-E63D6BF074C2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgenticRagScanner.RbacCli", "infra\tools\AgenticRagScanner.RbacCli\AgenticRagScanner.RbacCli.csproj", "{D7EFCD3A-BD26-4109-8608-40E40108B0E4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -71,11 +75,24 @@ Global
 		{136C17A2-BFD5-46F6-9AEB-6777377C7A1D}.Release|x64.Build.0 = Release|Any CPU
 		{136C17A2-BFD5-46F6-9AEB-6777377C7A1D}.Release|x86.ActiveCfg = Release|Any CPU
 		{136C17A2-BFD5-46F6-9AEB-6777377C7A1D}.Release|x86.Build.0 = Release|Any CPU
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4}.Debug|x64.Build.0 = Debug|Any CPU
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4}.Debug|x86.Build.0 = Debug|Any CPU
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4}.Release|x64.ActiveCfg = Release|Any CPU
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4}.Release|x64.Build.0 = Release|Any CPU
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4}.Release|x86.ActiveCfg = Release|Any CPU
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{D6CCCBEC-3043-4E9F-8C90-6BB278979678} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{D7EFCD3A-BD26-4109-8608-40E40108B0E4} = {30258541-D0D8-F3FD-D559-E63D6BF074C2}
 	EndGlobalSection
 EndGlobal
