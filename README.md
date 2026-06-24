@@ -144,10 +144,12 @@ Cognitive Services roles).
 
    - `Foundry` — Foundry endpoint + model deployment name (downstream MAF agents)
    - `WebSearch` — Foundry project endpoint + the name of the pre-provisioned Web Search
-     agent (optionally a pinned `AgentVersion`)
+     agent (optionally a pinned `AgentVersion`), plus `MaxResults` and `RequestTimeoutSeconds`
    - `Cosmos` — account endpoint, database, and checkpoints container
    - `AzureStorage` — blob service URI + container names (`documents`, `exports`)
    - `AzureSearch` — search endpoint + index name (planned memory store)
+   - `Fetch` — full-text fetch limits (allowed content types, max response size,
+     max redirects, request timeout)
    - `ApplicationInsights` — connection string (optional)
 
 ### Build & run
