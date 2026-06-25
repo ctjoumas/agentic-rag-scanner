@@ -386,8 +386,14 @@ or as part of the 11.4 security review. `labels: user-story, area:security` · *
 `labels: user-story, area:maf` · **depends on:** 12.1, 11.2.
 
 ### 12.4 — Decompose topic-group pass into per-step executors (mid-pass checkpointing + intra-group fan-out) · `lane:L1-orchestration` · `needs-design`
-**As an** engineer, **I want** each pipeline step modeled as its own MAF executor wired by edges (with a conditional loop-back from the Loop Controller), **so that** the run checkpoints **between steps** (resume mid-pass instead of replaying a whole pass) and the Fetch & Clean / Relevance Eval steps can fan out per document.
-**AC:** pass decomposed into per-step executors with a conditional loop-back edge; `SearchHistory` + per-step payloads checkpointed so a mid-pass failure resumes after the last completed step; Fetch & Clean fan-out/fan-in; per-step traces visible; existing pipeline tests pass (or are migrated). Design + trade-offs in **`docs/maf-executor-design.md`**.
+**As an** engineer, **I want** each pipeline step modeled as its own MAF executor wired by edges (with a conditional loop-back checked on the **Relevance Eval** executor's response), **so that** the run checkpoints **between steps** (resume mid-pass instead of replaying a whole pass) and the Fetch & Clean / Relevance Eval steps can fan out per document.
+**AC:**
+- The **loop body** is decomposed into **six per-step executors** wired in the frozen order: **(1) Query Synthesis → (2) Web Search → (3) Pre-filter → (4) Fetch & Clean → (5) Relevance Eval → (6) Finalize**.
+- The **branch is checked on the Relevance Eval executor's response**: it applies the loop-control rules (per-group `maxLoops` cap, ≥80%-relevant override) and emits the existing `ReviewDecision` whose `Decision` is a `LoopDecision` of `Retry` **or** `Finalize`. Two MAF conditional edges (`AddEdge(relevanceEval, target, condition: …)`) route on `ReviewDecision.Decision`: **`Retry` loops back to Query Synthesis (executor #1)** for another pass, **`Finalize` exits the workflow** to the finalize tail. (No separate Loop Controller node — the override + cap fold into the eval step and the fork is the conditional edges on its output.)
+- The **finalize chain** (Verdict Routing → Enrichment → Categorize → Summarize&Impact) stays a sequential tail (single `FinalizeExecutor` over today's `FinalizeAsync`), reached only on the `Finalize` edge — splitting it is out of scope here.
+- `SearchHistory` + per-step payloads (query, hits, filtered hits, documents, eval decision) checkpointed so a mid-pass failure resumes **after the last completed step**; per-pass `SearchHistory` checkpointing owned by the Relevance Eval executor.
+- Fetch & Clean fan-out/fan-in across documents; per-step traces visible; existing pipeline tests pass (or are migrated).
+- Design + trade-offs in **`docs/maf-executor-design.md`**.
 `labels: user-story, area:maf, needs-design` · **depends on:** 12.1 · *pairs with the same decomposition that enables 12.1.*
 
 **Epic demo:** the same pipeline that ran sequentially now runs topic groups **concurrently** under the throttle; throughput improves; the throttle caps active workers; parallel spans visible; cancellation still works.
