@@ -493,6 +493,7 @@ threading and keep the early phases focused on the core RAG loop.
 - [ ] **(L1)** Per-group cancellation still honored under parallel execution; partial results preserved.
 - [ ] **(L3)** Concurrency telemetry: in-flight concurrency gauge + throttle wait-time metric; parallel spans per run/group.
 - [ ] **(L1)** Load/throttle tuning under parallel load: stay within TPM/RPM/QPS with N groups in flight; backpressure verified; per-group cap documented.
+- [ ] **(L1)** `needs-design` Decompose the topic-group **loop body** into **six per-step MAF executors** wired by edges (**Query Synthesis → Web Search → Pre-filter → Fetch & Clean → Relevance Eval → Finalize**), with the branch **checked on the Relevance Eval executor's response**: it emits the existing `ReviewDecision` whose `Decision` is a `LoopDecision` (`Retry` → conditional loop-back edge to Query Synthesis for another pass; `Finalize` → conditional exit edge to the `FinalizeExecutor` tail), using MAF conditional edges (`AddEdge(relevanceEval, target, condition: …)` on `ReviewDecision.Decision`). Checkpoint **between steps** (resume mid-pass instead of replaying a whole pass); Fetch & Clean fan-out/fan-in per document; per-step traces. Design + trade-offs in **`docs/maf-executor-design.md`**; tracked as backlog **12.4**. *(Finalize chain stays a sequential tail — out of scope.)*
 
 **DoD / demo:** the same pipeline that ran sequentially now runs topic groups **concurrently** under
 the throttle; throughput improves; the throttle caps active workers; parallel spans visible; cancellation still works.
