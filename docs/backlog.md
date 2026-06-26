@@ -261,7 +261,7 @@ LLM-vs-final decision, override + reason, and the vetted vs. discarded items wit
 rationale, and dates).
 **AC:**
 - `TopicGroupResult.History` (`SearchHistorySnapshot?`, nullable) carries the per-pass snapshot; populated
-  by `TopicGroupLoopExecutor` on finalize from the in-memory `SearchHistory` (null for the Phase 1 stub).
+  by `FinalizeExecutor` on finalize from the in-memory `SearchHistory` (null for the Phase 1 stub).
 - The snapshot DTOs (`SearchHistorySnapshot` / `LoopPassSnapshot` / `ReviewSnapshot`) live in **Core** so
   the result can reference them, and are reused by the MAF checkpoint serializer.
 - Flows out through the API unchanged: `ScannerController` returns `ScanResult` whose `Groups[].History`
@@ -386,12 +386,12 @@ or as part of the 11.4 security review. `labels: user-story, area:security` · *
 `labels: user-story, area:maf` · **depends on:** 12.1, 11.2.
 
 ### 12.4 — Decompose topic-group pass into per-step executors (mid-pass checkpointing + intra-group fan-out) · `lane:L1-orchestration` · `needs-design`
-**As an** engineer, **I want** each pipeline step modeled as its own MAF executor wired by edges (with a conditional loop-back checked on the **Relevance Eval** executor's response), **so that** the run checkpoints **between steps** (resume mid-pass instead of replaying a whole pass) and the Fetch & Clean / Relevance Eval steps can fan out per document.
+**As an** engineer, **I want** each pipeline step modeled as its own MAF executor wired by edges (with a conditional loop-back checked on the **Loop Controller** executor's response), **so that** the run checkpoints **between steps** (resume mid-pass instead of replaying a whole pass) and the Fetch & Clean / Relevance Eval steps can fan out per document.
 **AC:**
-- The **loop body** is decomposed into **six per-step executors** wired in the frozen order: **(1) Query Synthesis → (2) Web Search → (3) Pre-filter → (4) Fetch & Clean → (5) Relevance Eval → (6) Finalize**.
-- The **branch is checked on the Relevance Eval executor's response**: it applies the loop-control rules (per-group `maxLoops` cap, ≥80%-relevant override) and emits the existing `ReviewDecision` whose `Decision` is a `LoopDecision` of `Retry` **or** `Finalize`. Two MAF conditional edges (`AddEdge(relevanceEval, target, condition: …)`) route on `ReviewDecision.Decision`: **`Retry` loops back to Query Synthesis (executor #1)** for another pass, **`Finalize` exits the workflow** to the finalize tail. (No separate Loop Controller node — the override + cap fold into the eval step and the fork is the conditional edges on its output.)
+- The **loop body** is decomposed into **seven executors** wired in the frozen order: **(1) Query Synthesis → (2) Web Search → (3) Pre-filter → (4) Fetch & Clean → (5) Relevance Eval → (6) Loop Controller → (7) Finalize**.
+- The **branch is checked on the Loop Controller executor's response**: `Relevance Eval` emits the raw `ReviewDecision`; `LoopControllerExecutor` (today's `ILoopController.ReviewPassAsync`) applies the loop-control rules (per-group `maxLoops` cap, ≥80%-relevant override), maps verdicts to vetted/discarded items (persisting carried full text to blob), and emits the existing `Review` whose `FinalDecision` is a `LoopDecision` of `Retry` **or** `Finalize`. Two MAF conditional edges (`AddEdge(loopController, target, condition: …)`) route on `Review.FinalDecision`: **`Retry` loops back to Query Synthesis (executor #1)** for another pass, **`Finalize` exits the workflow** to the finalize tail. (We keep `LoopController` as a distinct node because the decision needs state a stateless edge predicate can't see — the pass count + cap — and has side effects; folding it into the eval step is rejected.)
 - The **finalize chain** (Verdict Routing → Enrichment → Categorize → Summarize&Impact) stays a sequential tail (single `FinalizeExecutor` over today's `FinalizeAsync`), reached only on the `Finalize` edge — splitting it is out of scope here.
-- `SearchHistory` + per-step payloads (query, hits, filtered hits, documents, eval decision) checkpointed so a mid-pass failure resumes **after the last completed step**; per-pass `SearchHistory` checkpointing owned by the Relevance Eval executor.
+- `SearchHistory` + per-step payloads (query, hits, filtered hits, documents, eval decision) checkpointed so a mid-pass failure resumes **after the last completed step**; per-pass `SearchHistory` checkpointing owned by the Loop Controller executor.
 - Fetch & Clean fan-out/fan-in across documents; per-step traces visible; existing pipeline tests pass (or are migrated).
 - Design + trade-offs in **`docs/maf-executor-design.md`**.
 `labels: user-story, area:maf, needs-design` · **depends on:** 12.1 · *pairs with the same decomposition that enables 12.1.*

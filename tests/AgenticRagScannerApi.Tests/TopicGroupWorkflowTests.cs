@@ -2,7 +2,6 @@ using AgenticRagScannerApi.Core.Runtime;
 using AgenticRagScannerApi.Workflows;
 using FluentAssertions;
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AgenticRagScannerApi.Tests;
 
@@ -18,8 +17,8 @@ public class TopicGroupWorkflowTests
     public async Task Workflow_RunsToMaxLoops_YieldsResult_AndCreatesCheckpoints()
     {
         var context = WorkflowTestFactory.CreateContext(maxLoops: 2, allowlist: ["https://www.gov.uk"]);
-        var pipeline = WorkflowTestFactory.CreatePipeline();
-        var workflow = TopicGroupWorkflow.Build(context, pipeline, NullLoggerFactory.Instance);
+        var services = WorkflowTestFactory.CreateServiceProvider();
+        var workflow = TopicGroupWorkflow.Build(context, services);
         var checkpointManager = CheckpointManager.CreateInMemory();
 
         var run = await InProcessExecution.RunStreamingAsync(workflow, TopicGroupWorkflow.StartSignal, checkpointManager);

@@ -5,6 +5,8 @@ using AgenticRagScannerApi.Workflows.Configuration;
 using AgenticRagScannerApi.Workflows.Pipeline;
 using AgenticRagScannerApi.Workflows.Steps;
 using AgenticRagScannerApi.Workflows.Tools;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Net;
@@ -57,6 +59,33 @@ internal static class WorkflowTestFactory
             new CategorizeAgentStub(NullLogger<CategorizeAgentStub>.Instance),
             new SummarizeImpactAgentStub(NullLogger<SummarizeImpactAgentStub>.Instance),
             NullLogger<TopicGroupPipeline>.Instance);
+
+    /// <summary>
+    /// Builds a service provider with the 10 deterministic step/agent stubs (by interface) plus
+    /// logging, so <see cref="TopicGroupWorkflow.Build"/> can resolve each executor's dependencies via
+    /// <see cref="ActivatorUtilities"/> exactly as the host does.
+    /// </summary>
+    public static IServiceProvider CreateServiceProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddSingleton<IQuerySynthesisAgent>(sp => new QuerySynthesisAgentStub(sp.GetRequiredService<ILogger<QuerySynthesisAgentStub>>()));
+        services.AddSingleton<IWebSearchAgent, FakeWebSearchAgent>();
+        services.AddSingleton<IPreFilterStep>(sp => new PreFilterStep(sp.GetRequiredService<ILogger<PreFilterStep>>()));
+        services.AddSingleton<IFetchAndCleanStep>(sp => new FetchAndCleanStep(
+            new StubHttpClientFactory(),
+            Options.Create(new FetchOptions()),
+            sp.GetRequiredService<ILogger<FetchAndCleanStep>>()));
+        services.AddSingleton<IRelevanceEvalAgent>(sp => new RelevanceEvalAgentStub(sp.GetRequiredService<ILogger<RelevanceEvalAgentStub>>()));
+        services.AddSingleton<ILoopController>(sp => new LoopController(new StubFullTextStore(), sp.GetRequiredService<ILogger<LoopController>>()));
+        services.AddSingleton<IVerdictRouting>(sp => new VerdictRouting(sp.GetRequiredService<ILogger<VerdictRouting>>()));
+        services.AddSingleton<IEnrichmentAgent>(sp => new EnrichmentAgentStub(sp.GetRequiredService<ILogger<EnrichmentAgentStub>>()));
+        services.AddSingleton<ICategorizeAgent>(sp => new CategorizeAgentStub(sp.GetRequiredService<ILogger<CategorizeAgentStub>>()));
+        services.AddSingleton<ISummarizeImpactAgent>(sp => new SummarizeImpactAgentStub(sp.GetRequiredService<ILogger<SummarizeImpactAgentStub>>()));
+
+        return services.BuildServiceProvider();
+    }
 
     public static ResultItem Item(string url, Verdict verdict) =>
         new()

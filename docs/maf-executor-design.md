@@ -1,14 +1,20 @@
 # MAF executor design: single-executor pipeline vs. step-per-executor graph
 
-**Status:** Recommended — decompose the loop body into **six per-step executors** (Query Synthesis, Web Search, Pre-filter, Fetch & Clean, Relevance Eval, Loop Controller). No code change yet; tracked as backlog story 12.4 / implementation-plan Phase 12.
+**Status:** ✅ Implemented (phase-7) — the loop body is decomposed into **seven executors** (Query Synthesis, Web Search, Pre-filter, Fetch & Clean, Relevance Eval, Loop Controller, Finalize). The monolithic `TopicGroupLoopExecutor` and the `PassSignal` enum have been removed.
 **Audience:** Team review.
-**Scope:** How we orchestrate one topic group's agentic RAG loop on Microsoft Agent Framework (MAF), and whether to keep the current "pipeline inside one executor" shape or move to the more idiomatic "graph of executors connected by edges."
+**Scope:** How we orchestrate one topic group's agentic RAG loop on Microsoft Agent Framework (MAF), and whether to keep the original "pipeline inside one executor" shape or move to the more idiomatic "graph of executors connected by edges."
+
+> **Implementation note (as-built).** Sections 1–6 below are the original decision record (kept for context); the recommendation was adopted. Two details changed during implementation and are corrected in place:
+> - **Message records** use a `…Result` suffix: `PassStart`, `QueryResult`, `HitsResult`, `FilteredHitsResult`, `DocumentsResult`, `EvaluationResult` (the last wraps the documents + the raw `ReviewDecision`), then the domain `Review`. They live in `Executors/Messages.cs`.
+> - **Checkpoint ownership** is a *single owner* on `QuerySynthesisExecutor`, **not** the Loop Controller — see the corrected explanation in §6 and the mechanism in §3.1.
 
 ---
 
-## 1. What we have today
+## 1. The original design (historical — replaced in phase-7)
 
-One topic group runs as a **single MAF executor** that self-loops:
+> This section describes the single-executor shape that shipped first and was **removed** in phase-7. It's retained to explain what the decomposition replaced.
+
+One topic group ran as a **single MAF executor** that self-looped:
 
 - `TopicGroupLoopExecutor : Executor<PassSignal>` is the only node in the workflow graph.
 - The graph has exactly one edge: a **self-edge** that carries `PassSignal.Continue` to drive the next loop pass. (`TopicGroupWorkflow.Build`.)
@@ -88,6 +94,17 @@ If each step were its own executor, MAF would checkpoint at **each step boundary
 
 > Net: today's design = "checkpoint per pass." Decomposed graph = "checkpoint per step." For a loop that makes multiple paid LLM/Bing/HTTP calls per pass, per-step is materially more resilient and cheaper to recover.
 
+### 3.1 How per-step resume actually works (as-built)
+
+The decomposed graph delivers the mid-pass resume promised above, but the mechanism is subtle and worth spelling out, because it rests on **two facts working together**:
+
+1. **There is exactly one `SearchHistory`, shared by all seven executors.** `TopicGroupContext` is injected (by reference) into every executor's constructor via `ActivatorUtilities.CreateInstance<T>(serviceProvider, context)`, so they all hold the *same* instance. When `PreFilterExecutor` appends hits or `LoopControllerExecutor` records the pass `Review`, it mutates the same object `QuerySynthesisExecutor` references. The loop's accumulating state lives in one place no single executor "owns."
+2. **MAF invokes `OnCheckpointingAsync` on *every* executor at *every* super-step checkpoint** — not only the executor that ran that step. (We confirmed this empirically: having all seven write the same state key threw `InvalidOperationException: Expected exactly one update for key 'SearchHistory'`.)
+
+Put together: a **single checkpoint owner** is enough. `QuerySynthesisExecutor` carries the only `OnCheckpointingAsync` / `OnCheckpointRestoredAsync` hooks. Its save hook fires at the end of *every* super-step (not just step 1), each time snapshotting whatever the shared `SearchHistory` currently holds — so the checkpoint taken after step 4 already contains the in-progress pass *and* its hits. On resume, its restore hook rehydrates that one shared object, and because every other executor references the same instance, they all immediately see the restored state. One writer, one reader — and **multiple writers would simply collide on the key**, which is why the other six executors deliberately have no hooks.
+
+The history is written to a **named (`"shared"`) state scope** rather than an executor's private scope. A named scope is readable across executors (MAF's `ScopeKey` treats keys that differ only by `ExecutorId` as equal), which keeps the design honest even though, in-process, the shared object already does the heavy lifting. The serialize/restore logic is centralized in the static `SearchHistoryCheckpoint` helper.
+
 ---
 
 ## 4. Other benefits of the graph approach
@@ -116,28 +133,31 @@ Beyond checkpointing:
 - **If we want mid-pass resume, parallel fetch/eval, and per-step telemetry**, decompose the pass into per-step executors with a conditional loop-back edge from `LoopController`. That matches the canonical MAF design and our original intuition.
 - **Timing:** This is a meaningful refactor (mostly the shared-`context` → typed-message change), so it should **not** be folded into the current PR. It's a clean candidate for its own epic, and it **pairs naturally with parallel fan-out (Epic 12)** — the same decomposition that parallelizes topic groups also parallelizes fetch/eval *within* a group.
 
-### Recommended decomposition — six loop-body executors
+### Recommended decomposition — seven executors (six loop-body + finalize tail)
 
-When we decompose, the **loop body** (everything in `RunPassAsync`) becomes these **six executors**, wired in the frozen order. The loop's **branch lives on the Relevance Eval executor's response**: that executor applies the loop-control rules (max-pass cap, ≥80%-relevant early-exit override) and emits a decision of `Retry` **or** `Finalize`, which two MAF conditional edges route on:
+When we decompose, the **loop body** (everything in `RunPassAsync`) becomes **six executors** plus a **`FinalizeExecutor`** tail, wired in the frozen order. The loop's **branch lives on the Loop Controller executor's response**: `RelevanceEvalExecutor` emits the *raw* eval verdicts, and `LoopControllerExecutor` applies the loop-control rules (max-pass cap, ≥80%-relevant early-exit override), maps verdicts to vetted/discarded items (persisting carried full text to blob), and emits the existing `Review` whose `FinalDecision` is `Retry` **or** `Finalize` — which two MAF conditional edges route on:
 
 | # | Executor | Kind | Input → output message | Notes |
 | --- | --- | --- | --- | --- |
-| 1 | `QuerySynthesisExecutor` | LLM (MAF agent) | `PassStart` → `QueryReady` | reads `SearchHistory` to rotate synonyms / avoid redundancy; one query per pass; **loop-back target on `Retry`** |
-| 2 | `WebSearchExecutor` | Foundry agent (Grounding w/ Bing Custom Search) | `QueryReady` → `HitsReady` | executes the synthesized query; allowlist-scoped |
-| 3 | `PreFilterExecutor` | deterministic code | `HitsReady` → `FilteredHits` | dedupe (incl. earlier passes + cross-group) + URL validity |
-| 4 | `FetchAndCleanExecutor` | HTTP | `FilteredHits` → `DocumentsReady` | **fan-out/fan-in per hit** (replaces the sequential `foreach`) |
-| 5 | `RelevanceEvalExecutor` | LLM (MAF agent) + loop-control rules | `DocumentsReady` → `ReviewDecision (Decision: LoopDecision)` | full text + dates + history → per-item verdicts; **the branching node**: its `ReviewDecision.Decision` is checked by two conditional edges — `Retry` loops back to (1), `Finalize` exits to the finalize tail |
-| 6 | `FinalizeExecutor` | code | `ReviewDecision (Finalize)` → result | runs the existing sequential finalize tail (`VerdictRouting → Enrichment → Categorize → Summarize&Impact`); reached **only** on the `Finalize` edge |
+| 1 | `QuerySynthesisExecutor` | LLM (MAF agent) | `PassStart` / `Review` → `QueryResult` | reads `SearchHistory` to rotate synonyms / avoid redundancy; one query per pass; **loop-back target on `Retry`** (re-entered with the controller's `Review`); **sole checkpoint owner** (see §3.1) |
+| 2 | `WebSearchExecutor` | Foundry agent (Grounding w/ Bing Custom Search) | `QueryResult` → `HitsResult` | executes the synthesized query; allowlist-scoped |
+| 3 | `PreFilterExecutor` | deterministic code | `HitsResult` → `FilteredHitsResult` | dedupe (incl. earlier passes + cross-group) + URL validity; **sole writer of the pass's hits** |
+| 4 | `FetchAndCleanExecutor` | HTTP | `FilteredHitsResult` → `DocumentsResult` | sequential per hit today (fan-out/fan-in is a later step) |
+| 5 | `RelevanceEvalExecutor` | LLM (MAF agent) | `DocumentsResult` → `EvaluationResult` | full text + dates + history → per-item verdicts + the *raw* `ReviewDecision`; documents ride along in the message; no loop-control rules here |
+| 6 | `LoopControllerExecutor` | deterministic code | `EvaluationResult` → `Review` | **the branching node**: applies the `maxLoops` cap + ≥80% recall override to produce `Review.FinalDecision`, maps verdicts to vetted/discarded items (persists carried full text to blob); its `Review.FinalDecision` is checked by two conditional edges — `Retry` loops back to (1), `Finalize` exits to the finalize tail |
+| 7 | `FinalizeExecutor` | code | `Review` → yields `TopicGroupResult` | runs the existing sequential finalize tail (`VerdictRouting → Enrichment → Categorize → Summarize&Impact`); reached **only** on the `Finalize` edge; terminal node, so it `YieldOutputAsync`es the result rather than emitting an edge message |
 
-**Scope note — finalize chain stays a tail.** The post-loop chain (`VerdictRouting → Enrichment → Categorize → Summarize&Impact`) is **out of scope** for this decomposition. On the Relevance Eval executor's **Finalize** edge it remains the existing sequential tail (kept as a single `FinalizeExecutor` over today's `FinalizeAsync`). Splitting the finalize chain into per-step executors can follow later if per-item fan-out or per-step telemetry is wanted there too.
+**Scope note — finalize chain stays a tail.** The post-loop chain (`VerdictRouting → Enrichment → Categorize → Summarize&Impact`) is **out of scope** for this decomposition. On the Loop Controller executor's **Finalize** edge it remains the existing sequential tail (kept as a single `FinalizeExecutor` over today's `FinalizeAsync`). Splitting the finalize chain into per-step executors can follow later if per-item fan-out or per-step telemetry is wanted there too.
 
-**Why the branch lives on the Relevance Eval response.** "Retry vs finalize" is a runtime routing decision made *from* the eval result — the relevance verdicts (plus the pass-count cap and the ≥80% override) are exactly the inputs that decide it. In MAF a fork is expressed as **two outgoing conditional edges from one executor**, each guarded by a `condition: Func<object?, bool>` predicate that inspects that executor's output message. So the Relevance Eval executor emits the existing `ReviewDecision` whose `Decision` is a `LoopDecision` (`Retry` or `Finalize`), one conditional edge loops back to `QuerySynthesisExecutor` (executor #1) on `Retry`, and the other exits to `FinalizeExecutor` on `Finalize`. This executor is also the natural per-pass synchronization / checkpoint owner (where `SearchHistory` is fully updated for the pass), so the per-pass `OnCheckpointingAsync` / `OnCheckpointRestoredAsync` live here. A separate "loop controller" node is unnecessary — the loop-control logic folds into the eval step and the fork is the conditional edges themselves.
+**Why the branch lives on the Loop Controller response.** "Retry vs finalize" is a runtime routing decision that needs state a stateless edge predicate can't see: the pass count and `maxLoops` cap plus the ≥80% recall override. It also has side effects (mapping verdicts to vetted/discarded items and persisting carried full text to blob). MAF edge conditions are stateless `Func<object?, bool>` predicates over the source executor's *output message* only, so the decision logic must live in an executor and the "conditional" is the edges reading its output. We keep the existing `LoopController` as that executor: `RelevanceEvalExecutor` emits the raw `ReviewDecision` (wrapped in `EvaluationResult` alongside the documents), `LoopControllerExecutor` runs today's `ReviewPassAsync` (cap + override + item routing + blob persistence) and emits the existing `Review` carrying the final decision. In MAF a fork is **two outgoing conditional edges from one executor**, each guarded by a `condition: Func<T, bool>` predicate over its output: one loops back to `QuerySynthesisExecutor` (executor #1) when `Review.FinalDecision == Retry`, the other exits to `FinalizeExecutor` when `Review.FinalDecision == Finalize`. Keeping it a distinct node (rather than folding the rules into the eval step) preserves the existing separation of concerns and the unit-testable `ILoopController`.
+
+> **Correction (as-built): checkpoint owner is Query Synthesis, not the Loop Controller.** This doc originally proposed putting the per-pass `OnCheckpointingAsync` / `OnCheckpointRestoredAsync` on the Loop Controller as "the natural per-pass synchronization point." That isn't how the shared-state checkpoint works (see §3.1): because `SearchHistory` is one object shared by all executors and MAF fires the checkpoint hook on *every* executor each super-step, exactly **one** executor must write the shared key or the writes collide. We put that single owner on `QuerySynthesisExecutor` (the always-present start node); its save hook still captures the fully-updated history at every super-step boundary, including after the Loop Controller runs.
 
 ### Suggested decision
 
-1. Ship the current single-executor design for this phase.
-2. Open an epic: *"Decompose topic-group pass into per-step executors (mid-pass checkpointing + fan-out)."* — the **six** loop-body executors above (story 12.4).
-3. Sequence it with / before Epic 12 (parallel fan-out), since they share the decomposition work.
+1. ~~Ship the current single-executor design for this phase.~~ Shipped, then superseded.
+2. ~~Open an epic: *"Decompose topic-group pass into per-step executors (mid-pass checkpointing + fan-out)."*~~ **✅ Done (phase-7):** the **seven** executors above are implemented, the monolith + `PassSignal` removed, and mid-pass resume is proven by `WorkflowResumeTests` (resumes from a mid-pass checkpoint and completes).
+3. Fan-out/fan-in *within* `FetchAndCleanExecutor` (and per-doc eval) remains future work and still pairs naturally with Epic 12 (parallel topic groups).
 
 ---
 
@@ -147,42 +167,47 @@ Rough executor shapes (names illustrative):
 
 ```csharp
 // Each step is its own executor; messages are the typed payloads between steps.
-sealed class QuerySynthesisExecutor   : Executor<PassStart, QueryReady> { /* LLM */ }
-sealed class WebSearchExecutor        : Executor<QueryReady, HitsReady> { /* Bing */ }
-sealed class PreFilterExecutor        : Executor<HitsReady, FilteredHits> { /* code */ }
-sealed class FetchAndCleanExecutor    : Executor<FilteredHits, DocumentsReady> { /* fan-out per hit */ }
-// Relevance Eval runs IRelevanceEvalAgent.EvaluateAsync and applies the loop-control rules
-// (recall override + maxLoops cap) so the emitted ReviewDecision.Decision is the *final* decision.
-sealed class RelevanceEvalExecutor    : Executor<DocumentsReady, ReviewDecision> { /* LLM + loop rules */ }
-sealed class FinalizeExecutor         : Executor<ReviewDecision> { /* VerdictRouting → … → result */ }
+sealed class QuerySynthesisExecutor   : Executor              { /* PassStart|Review → QueryResult; LLM; sole checkpoint owner */ }
+sealed class WebSearchExecutor        : Executor<QueryResult, HitsResult> { /* Bing */ }
+sealed class PreFilterExecutor        : Executor<HitsResult, FilteredHitsResult> { /* code */ }
+sealed class FetchAndCleanExecutor    : Executor<FilteredHitsResult, DocumentsResult> { /* per hit */ }
+// Relevance Eval runs IRelevanceEvalAgent.EvaluateAsync and emits the *raw* verdicts + documents.
+sealed class RelevanceEvalExecutor    : Executor<DocumentsResult, EvaluationResult> { /* LLM */ }
+// Loop Controller runs today's ILoopController.ReviewPassAsync (recall override + maxLoops cap +
+// item routing + blob persistence) so the emitted Review.FinalDecision is the *final* decision.
+sealed class LoopControllerExecutor   : Executor<EvaluationResult, Review> { /* code + loop rules */ }
+sealed class FinalizeExecutor         : Executor<Review> { /* VerdictRouting → … → YieldOutputAsync(result) */ }
 ```
 
 The decision the conditional edges route on is the existing `LoopDecision` enum, carried on the eval agent's existing `ReviewDecision` output — no new types are needed:
 
 ```csharp
-// Existing contracts (AgenticRagScannerApi.Core.Contracts):
+// Existing contracts (AgenticRagScannerApi.Core.Contracts / .Runtime):
 //   enum LoopDecision { Retry, Finalize }
 //   sealed class ReviewDecision { string ThoughtProcess; LoopDecision Decision; IReadOnlyList<ItemVerdict> Items; }
-// IRelevanceEvalAgent.EvaluateAsync(...) returns ReviewDecision.
+//   sealed class Review { LoopDecision LlmDecision; LoopDecision FinalDecision; ... }
+// IRelevanceEvalAgent.EvaluateAsync(...) returns ReviewDecision; ILoopController.ReviewPassAsync(...) produces the Review.
 
-// Type-safe condition factory, per the MAF conditional-edges pattern.
+// Type-safe condition factory, per the MAF conditional-edges pattern — routes on the
+// Loop Controller's Review.FinalDecision (cap + recall override already applied).
 static Func<object?, bool> When(LoopDecision expected) =>
-    msg => msg is ReviewDecision r && r.Decision == expected;
+    msg => msg is Review r && r.FinalDecision == expected;
 ```
 
 ```csharp
 var builder = new WorkflowBuilder(querySynthesis)
     .AddEdge(querySynthesis, webSearch)
     .AddEdge(webSearch, preFilter)
-    .AddEdge(preFilter, fetchAndClean)     // fan-out happens inside / via per-item activations
-    .AddEdge(fetchAndClean, relevanceEval) // fan-in before eval
-    // The branch is checked on the Relevance Eval executor's ReviewDecision response:
-    .AddEdge(relevanceEval, querySynthesis, condition: When(LoopDecision.Retry))     // Retry → back to executor #1 for another pass
-    .AddEdge(relevanceEval, finalize,       condition: When(LoopDecision.Finalize))  // Finalize → exit to the finalize tail
+    .AddEdge(preFilter, fetchAndClean)
+    .AddEdge(fetchAndClean, relevanceEval)
+    .AddEdge(relevanceEval, loopController)  // EvaluationResult (raw decision + docs) → cap + override → Review
+    // The branch is checked on the Loop Controller executor's Review.FinalDecision response:
+    .AddEdge<Review>(loopController, querySynthesis, condition: r => r.FinalDecision == LoopDecision.Retry)     // → another pass
+    .AddEdge<Review>(loopController, finalize,       condition: r => r.FinalDecision == LoopDecision.Finalize)  // → finalize tail
     .WithOutputFrom(finalize);
 ```
 
-> **Decision precedence.** Today the eval agent emits the *raw* decision (`ReviewDecision.Decision` → `Review.LlmDecision`) and the **LoopController** applies the recall override + `maxLoops` cap to produce `Review.FinalDecision`, which `TopicGroupContext.ShouldContinue()` reads. In the decomposed design those rules fold into `RelevanceEvalExecutor`, so the `ReviewDecision` it emits already carries the **final** `LoopDecision` the conditional edges route on (at the cap it is always `Finalize`).
+> **Decision precedence.** Today the eval agent emits the *raw* decision (`ReviewDecision.Decision` → `Review.LlmDecision`) and the **LoopController** applies the recall override + `maxLoops` cap to produce `Review.FinalDecision`, which `TopicGroupContext.ShouldContinue()` reads. The decomposed design keeps that split: `RelevanceEvalExecutor` emits the raw `ReviewDecision`, and `LoopControllerExecutor` produces the `Review` whose `FinalDecision` the conditional edges route on (at the cap it is always `Finalize`).
 
 `SearchHistory` would still be checkpointed, but per-step intermediate payloads (hits, filtered, documents) would also be checkpointable, enabling resume between steps.
 
