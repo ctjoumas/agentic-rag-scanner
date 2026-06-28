@@ -18,7 +18,18 @@ internal sealed class FoundryRbacService(RbacExecutionContext context)
         }
 
         var (Ok, Json, Message) = RbacExecutionContext.RunJson(["az", "cognitiveservices", "account", "show", "--name", accountName, "--resource-group", resourceGroup]);
-        string accountId = Ok && Json.HasValue ? RbacExecutionContext.GetString(Json.Value, "id") ?? string.Empty : string.Empty;
+        if (!Ok || !Json.HasValue)
+        {
+            RbacExecutionContext.PrintError($"Could not retrieve Microsoft Foundry account '{accountName}': {Message}");
+            return;
+        }
+
+        string accountId = RbacExecutionContext.GetString(Json.Value, "id") ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(accountId))
+        {
+            RbacExecutionContext.PrintError($"Could not resolve Microsoft Foundry account resource ID for '{accountName}'.");
+            return;
+        }
 
         _armRoles.AssignArmRole("Azure AI Developer", accountId, principalId, accountName, assigneeIsObjectId);
         _armRoles.AssignArmRole(FoundryUserRoleId, accountId, principalId, accountName, assigneeIsObjectId);
