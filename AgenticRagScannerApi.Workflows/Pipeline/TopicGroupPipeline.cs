@@ -64,14 +64,14 @@ public sealed class TopicGroupPipeline
     {
         // 1. Query synthesis - reads SearchHistory to rotate synonyms / avoid redundancy. One query
         //    per pass: breadth comes from the agentic loop re-synthesizing on later passes.
-        var query = await _querySynthesis.SynthesizeAsync(context, cancellationToken);
+        var synthesis = await _querySynthesis.SynthesizeAsync(context, cancellationToken);
 
         // Start the pass and append it so LoopCount reflects this pass during eval/control.
-        var pass = new LoopPass { Pass = context.LoopCount + 1, Query = query };
+        var pass = new LoopPass { Pass = context.LoopCount + 1, Query = synthesis.Query, QueryRationale = synthesis.Rationale };
         context.History.Passes.Add(pass);
 
         // 2. Bing search (allowlist-gated tool).
-        var hits = await _webSearch.SearchAsync(query, context.Run, cancellationToken);
+        var hits = await _webSearch.SearchAsync(synthesis.Query, context.Run, cancellationToken);
 
         // 3. Deterministic pre-filter (dedupe incl. earlier passes + cross-group + URL validity).
         var filtered = _preFilter.Filter(hits, context);
@@ -87,7 +87,7 @@ public sealed class TopicGroupPipeline
         // 5. Relevance eval (full text + dates + history) -> per-item verdicts + raw decision.
         var decision = await _relevanceEval.EvaluateAsync(context, documents, cancellationToken);
 
-        // 6. Loop controller - records the pass Review and decides retry/finalize (honors maxLoops).
+        // 6. Loop controller - records the pass Review and decides retry/finalize based on maxLoops and % of relevant docs in the current pass (>=80% forces a retry)
         var loopDecision = await _loopController.ReviewPassAsync(context, documents, decision, cancellationToken);
 
         _logger.LogDebug(

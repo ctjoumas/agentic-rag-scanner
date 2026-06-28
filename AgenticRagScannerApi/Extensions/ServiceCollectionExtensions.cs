@@ -162,10 +162,10 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddWorkflowServices(this IServiceCollection services)
     {
-        // MAF workflow agents. Query Synthesis is the first real agent (Epic 3) - a MAF agent over the
-        // shared Foundry IChatClient; the remaining four stay stubs (no LLM calls) until Epics 6/7.
+        // MAF workflow agents over the shared Foundry IChatClient. Query Synthesis (Epic 3) and
+        // Relevance Eval (Epic 6) are real; the remaining three stay stubs (no LLM calls) until Epic 7.
         services.AddSingleton<IQuerySynthesisAgent, QuerySynthesisAgent>();
-        services.AddSingleton<IRelevanceEvalAgent, RelevanceEvalAgentStub>();
+        services.AddSingleton<IRelevanceEvalAgent, RelevanceEvalAgent>();
         services.AddSingleton<IEnrichmentAgent, EnrichmentAgentStub>();
         services.AddSingleton<ICategorizeAgent, CategorizeAgentStub>();
         services.AddSingleton<ISummarizeImpactAgent, SummarizeImpactAgentStub>();

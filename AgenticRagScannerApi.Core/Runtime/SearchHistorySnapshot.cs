@@ -1,12 +1,13 @@
 using AgenticRagScannerApi.Core.Contracts;
-using AgenticRagScannerApi.Core.Runtime;
 
-namespace AgenticRagScannerApi.Workflows.Pipeline;
+namespace AgenticRagScannerApi.Core.Runtime;
 
 /// <summary>
-/// Flat, JSON-friendly snapshot of <see cref="SearchHistory"/> for MAF checkpointing. The runtime
-/// type exposes computed projections and init-only members, so checkpoint state is mapped through
-/// these DTOs (see <see cref="SearchHistorySerializer"/>).
+/// Flat, JSON-friendly snapshot of <see cref="SearchHistory"/>. The runtime type exposes computed
+/// projections and init-only members, so it is mapped through these immutable DTOs. Two consumers share
+/// this shape: MAF checkpoint state (resumability) and the per-group <see cref="TopicGroupResult.History"/>
+/// returned at the end of a run (so a developer UI can replay every pass - query, hits, verdicts, and the
+/// retry/finalize reasoning).
 /// </summary>
 public sealed record SearchHistorySnapshot(
     List<LoopPassSnapshot> Passes,

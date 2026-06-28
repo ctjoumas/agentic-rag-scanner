@@ -1,6 +1,6 @@
 # MAF executor design: single-executor pipeline vs. step-per-executor graph
 
-**Status:** Discussion / proposal — no code change yet.
+**Status:** Recommended — decompose the loop body into **six per-step executors** (Query Synthesis, Web Search, Pre-filter, Fetch & Clean, Relevance Eval, Loop Controller). No code change yet; tracked as backlog story 12.4 / implementation-plan Phase 12.
 **Audience:** Team review.
 **Scope:** How we orchestrate one topic group's agentic RAG loop on Microsoft Agent Framework (MAF), and whether to keep the current "pipeline inside one executor" shape or move to the more idiomatic "graph of executors connected by edges."
 
@@ -116,10 +116,27 @@ Beyond checkpointing:
 - **If we want mid-pass resume, parallel fetch/eval, and per-step telemetry**, decompose the pass into per-step executors with a conditional loop-back edge from `LoopController`. That matches the canonical MAF design and our original intuition.
 - **Timing:** This is a meaningful refactor (mostly the shared-`context` → typed-message change), so it should **not** be folded into the current PR. It's a clean candidate for its own epic, and it **pairs naturally with parallel fan-out (Epic 12)** — the same decomposition that parallelizes topic groups also parallelizes fetch/eval *within* a group.
 
+### Recommended decomposition — six loop-body executors
+
+When we decompose, the **loop body** (everything in `RunPassAsync`) becomes these **six executors**, wired in the frozen order. The loop's **branch lives on the Relevance Eval executor's response**: that executor applies the loop-control rules (max-pass cap, ≥80%-relevant early-exit override) and emits a decision of `Retry` **or** `Finalize`, which two MAF conditional edges route on:
+
+| # | Executor | Kind | Input → output message | Notes |
+| --- | --- | --- | --- | --- |
+| 1 | `QuerySynthesisExecutor` | LLM (MAF agent) | `PassStart` → `QueryReady` | reads `SearchHistory` to rotate synonyms / avoid redundancy; one query per pass; **loop-back target on `Retry`** |
+| 2 | `WebSearchExecutor` | Foundry agent (Grounding w/ Bing Custom Search) | `QueryReady` → `HitsReady` | executes the synthesized query; allowlist-scoped |
+| 3 | `PreFilterExecutor` | deterministic code | `HitsReady` → `FilteredHits` | dedupe (incl. earlier passes + cross-group) + URL validity |
+| 4 | `FetchAndCleanExecutor` | HTTP | `FilteredHits` → `DocumentsReady` | **fan-out/fan-in per hit** (replaces the sequential `foreach`) |
+| 5 | `RelevanceEvalExecutor` | LLM (MAF agent) + loop-control rules | `DocumentsReady` → `ReviewDecision (Decision: LoopDecision)` | full text + dates + history → per-item verdicts; **the branching node**: its `ReviewDecision.Decision` is checked by two conditional edges — `Retry` loops back to (1), `Finalize` exits to the finalize tail |
+| 6 | `FinalizeExecutor` | code | `ReviewDecision (Finalize)` → result | runs the existing sequential finalize tail (`VerdictRouting → Enrichment → Categorize → Summarize&Impact`); reached **only** on the `Finalize` edge |
+
+**Scope note — finalize chain stays a tail.** The post-loop chain (`VerdictRouting → Enrichment → Categorize → Summarize&Impact`) is **out of scope** for this decomposition. On the Relevance Eval executor's **Finalize** edge it remains the existing sequential tail (kept as a single `FinalizeExecutor` over today's `FinalizeAsync`). Splitting the finalize chain into per-step executors can follow later if per-item fan-out or per-step telemetry is wanted there too.
+
+**Why the branch lives on the Relevance Eval response.** "Retry vs finalize" is a runtime routing decision made *from* the eval result — the relevance verdicts (plus the pass-count cap and the ≥80% override) are exactly the inputs that decide it. In MAF a fork is expressed as **two outgoing conditional edges from one executor**, each guarded by a `condition: Func<object?, bool>` predicate that inspects that executor's output message. So the Relevance Eval executor emits the existing `ReviewDecision` whose `Decision` is a `LoopDecision` (`Retry` or `Finalize`), one conditional edge loops back to `QuerySynthesisExecutor` (executor #1) on `Retry`, and the other exits to `FinalizeExecutor` on `Finalize`. This executor is also the natural per-pass synchronization / checkpoint owner (where `SearchHistory` is fully updated for the pass), so the per-pass `OnCheckpointingAsync` / `OnCheckpointRestoredAsync` live here. A separate "loop controller" node is unnecessary — the loop-control logic folds into the eval step and the fork is the conditional edges themselves.
+
 ### Suggested decision
 
 1. Ship the current single-executor design for this phase.
-2. Open an epic: *"Decompose topic-group pass into per-step executors (mid-pass checkpointing + fan-out)."*
+2. Open an epic: *"Decompose topic-group pass into per-step executors (mid-pass checkpointing + fan-out)."* — the **six** loop-body executors above (story 12.4).
 3. Sequence it with / before Epic 12 (parallel fan-out), since they share the decomposition work.
 
 ---
@@ -134,9 +151,23 @@ sealed class QuerySynthesisExecutor   : Executor<PassStart, QueryReady> { /* LLM
 sealed class WebSearchExecutor        : Executor<QueryReady, HitsReady> { /* Bing */ }
 sealed class PreFilterExecutor        : Executor<HitsReady, FilteredHits> { /* code */ }
 sealed class FetchAndCleanExecutor    : Executor<FilteredHits, DocumentsReady> { /* fan-out per hit */ }
-sealed class RelevanceEvalExecutor    : Executor<DocumentsReady, EvalDone> { /* LLM */ }
-sealed class LoopControllerExecutor   : Executor<EvalDone> { /* routes Continue | Finalize */ }
-// finalize chain: VerdictRouting → Enrichment → Categorize → Summarize&Impact → yield result
+// Relevance Eval runs IRelevanceEvalAgent.EvaluateAsync and applies the loop-control rules
+// (recall override + maxLoops cap) so the emitted ReviewDecision.Decision is the *final* decision.
+sealed class RelevanceEvalExecutor    : Executor<DocumentsReady, ReviewDecision> { /* LLM + loop rules */ }
+sealed class FinalizeExecutor         : Executor<ReviewDecision> { /* VerdictRouting → … → result */ }
+```
+
+The decision the conditional edges route on is the existing `LoopDecision` enum, carried on the eval agent's existing `ReviewDecision` output — no new types are needed:
+
+```csharp
+// Existing contracts (AgenticRagScannerApi.Core.Contracts):
+//   enum LoopDecision { Retry, Finalize }
+//   sealed class ReviewDecision { string ThoughtProcess; LoopDecision Decision; IReadOnlyList<ItemVerdict> Items; }
+// IRelevanceEvalAgent.EvaluateAsync(...) returns ReviewDecision.
+
+// Type-safe condition factory, per the MAF conditional-edges pattern.
+static Func<object?, bool> When(LoopDecision expected) =>
+    msg => msg is ReviewDecision r && r.Decision == expected;
 ```
 
 ```csharp
@@ -145,14 +176,13 @@ var builder = new WorkflowBuilder(querySynthesis)
     .AddEdge(webSearch, preFilter)
     .AddEdge(preFilter, fetchAndClean)     // fan-out happens inside / via per-item activations
     .AddEdge(fetchAndClean, relevanceEval) // fan-in before eval
-    .AddEdge(relevanceEval, loopController)
-    .AddEdge(loopController, querySynthesis, condition: d => d.Continue)  // loop-back edge
-    .AddEdge(loopController, verdictRouting, condition: d => d.Finalize)  // exit edge
-    .AddEdge(verdictRouting, enrichment)
-    .AddEdge(enrichment, categorize)
-    .AddEdge(categorize, summarize)
-    .WithOutputFrom(summarize);
+    // The branch is checked on the Relevance Eval executor's ReviewDecision response:
+    .AddEdge(relevanceEval, querySynthesis, condition: When(LoopDecision.Retry))     // Retry → back to executor #1 for another pass
+    .AddEdge(relevanceEval, finalize,       condition: When(LoopDecision.Finalize))  // Finalize → exit to the finalize tail
+    .WithOutputFrom(finalize);
 ```
+
+> **Decision precedence.** Today the eval agent emits the *raw* decision (`ReviewDecision.Decision` → `Review.LlmDecision`) and the **LoopController** applies the recall override + `maxLoops` cap to produce `Review.FinalDecision`, which `TopicGroupContext.ShouldContinue()` reads. In the decomposed design those rules fold into `RelevanceEvalExecutor`, so the `ReviewDecision` it emits already carries the **final** `LoopDecision` the conditional edges route on (at the cap it is always `Finalize`).
 
 `SearchHistory` would still be checkpointed, but per-step intermediate payloads (hits, filtered, documents) would also be checkpointable, enabling resume between steps.
 

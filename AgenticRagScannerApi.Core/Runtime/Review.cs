@@ -5,7 +5,7 @@ namespace AgenticRagScannerApi.Core.Runtime;
 /// <summary>
 /// The recorded review/eval outcome for ONE loop pass (lives on <see cref="LoopPass"/>).
 /// Built from the eval agent's <see cref="ReviewDecision"/> after the loop controller applies the
-/// accuracy override. Self-contained so a pass can be inspected without cross-referencing arrays.
+/// recall override. Self-contained so a pass can be inspected without cross-referencing arrays.
 /// </summary>
 public sealed class Review
 {
@@ -15,7 +15,7 @@ public sealed class Review
     /// <summary>The eval agent's raw decision.</summary>
     public LoopDecision LlmDecision { get; init; }
 
-    /// <summary>The decision actually applied, after the accuracy override.</summary>
+    /// <summary>The decision actually applied, after the recall override.</summary>
     public LoopDecision FinalDecision { get; init; }
 
     /// <summary>True when the override changed the decision.</summary>

@@ -21,9 +21,13 @@ public sealed class TopicGroupContext
     public int LoopCount => History.Passes.Count;
 
     /// <summary>
-    /// Loop predicate the MAF conditional uses: continue while under the per-group cap and the last
-    /// pass asked to retry. The accuracy override is already baked into the recorded FinalDecision,
-    /// so this just reads it. Defaults to "continue" before the first pass has been reviewed.
+    /// Loop predicate the MAF conditional uses. The recorded <see cref="Review.FinalDecision"/> is the
+    /// primary signal: the LoopController has already baked both the recall override and the maxLoops cap
+    /// into it (at the cap it always records Finalize), so reading it is sufficient. The
+    /// <c>LoopCount &lt; MaxLoops</c> term is therefore redundant for correctness today - it is kept as a
+    /// cheap defensive backstop that still guarantees termination of this paid agentic loop even if a
+    /// future LoopController change failed to finalize at the cap. Defaults to "continue" before the first
+    /// pass has been reviewed.
     /// </summary>
     public bool ShouldContinue() =>
         LoopCount < TopicGroup.MaxLoops &&

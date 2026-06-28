@@ -16,9 +16,9 @@ public class StubAgentsTests
         var context = WorkflowTestFactory.CreateContext();
         var agent = new QuerySynthesisAgentStub(NullLogger<QuerySynthesisAgentStub>.Instance);
 
-        var query = await agent.SynthesizeAsync(context);
+        var result = await agent.SynthesizeAsync(context);
 
-        query.Should().NotBeNullOrWhiteSpace();
+        result.Query.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]

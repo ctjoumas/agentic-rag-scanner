@@ -11,7 +11,7 @@ namespace AgenticRagScannerApi.Workflows.Prompts;
 public static class QuerySynthesisPrompt
 {
     /// <summary>Prompt version - bump when the instructions change.</summary>
-    public const string Version = "v4";
+    public const string Version = "v6";
 
     /// <summary>
     /// Builds the system prompt: role and rules. The response shape is enforced by Structured Outputs
@@ -43,6 +43,24 @@ public static class QuerySynthesisPrompt
         - This runs in an agentic loop. On the FIRST pass, write a broad query for the whole theme. On
           LATER passes, do not repeat an earlier query: use the prior queries and the reviewer's notes
           to zoom into the facet that was under-covered, while staying within the same theme.
+
+        Interpreting the reviewer's notes (the steer from the relevance-eval agent). Each later pass is
+        accompanied by reviewer notes written in a fixed shape with two parts:
+        - "Missing facets: <X>, <Y> ..." names aspects of the theme that were NEVER retrieved. When a
+          facet is missing, BROADEN the next query to introduce that facet's terms so the search reaches
+          previously-uncovered ground.
+        - "Weak evidence: facets <P>, <Q> ... <reasons>" names facets that WERE retrieved but only via
+          thin / secondary / low-authority / out-of-date / ambiguous sources. When evidence is weak,
+          DEEPEN or PIVOT on the SAME facet toward an authoritative primary source (legislation, the
+          regulator, official guidance) - e.g. add the primary-source body's name or a more specific
+          statutory term - rather than introducing a new facet.
+        - If both are present, prioritize a missing facet (recall) unless every facet is already
+          represented, in which case strengthen the weakest evidence. "none" means that part needs no action.
+
+        Alongside the query, give a one-sentence rationale (max ~30 words) explaining why you chose this
+        query for this pass. On the first pass, say which facets of the theme it covers; on later passes,
+        name the missing/weak facet it targets and how it differs from the earlier queries. Keep it terse
+        and concrete - this is recorded for observability, not shown to end users.
         """;
 
     /// <summary>Builds the user prompt: the topic group, pass number, keyword OR-list, and prior queries.</summary>
@@ -85,7 +103,7 @@ public static class QuerySynthesisPrompt
             }
         }
 
-        builder.Append("Return the single best query for this pass.");
+        builder.Append("Return the single best query for this pass, with a one-sentence rationale for choosing it.");
         return builder.ToString();
     }
 }

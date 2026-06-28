@@ -19,8 +19,9 @@
   and aliases, e.g. `"Advisory Fuel Rates" OR "AFR" OR "Company Car" OR "EV"`). The number of
   queries per pass is the agent's decision, not a hard-coded 4.
 - **Iterative, history-aware loop.** Each pass appends to a per-topic-group **search history**
-  held **in memory for the duration of the run** (not persisted to a database) — e.g. a JSON
-  object with arrays for `searchQueries`, `vettedResults`, `discardedResults`, etc. On a re-run,
+  held **in memory for the duration of the run** (it is *not* a queryable DB store; a read-only
+  snapshot is checkpointed for resume and returned on the run result for the future UI) — e.g. a
+  JSON object with arrays for `searchQueries`, `vettedResults`, `discardedResults`, etc. On a re-run,
   the query-synthesis agent uses that history to craft a *new, non-redundant* query (cover
   untested synonyms, fill gaps), and the eval agent uses it to avoid re-judging duplicates and
   to assess coverage against the goal.
@@ -37,7 +38,7 @@
     many synonyms/aliases (e.g. the Miscellaneous / IR35 group) may warrant a higher cap so the
     query-synthesis agent can rotate coverage across more passes; small groups can stay at 3 or lower.
   - Goal-satisfaction: eval agent judges the topic-group goal met (enough data gathered).
-  - **Accuracy override:** if a single pass returns **> 80% RELEVANT**, force another pass
+  - **Accuracy override:** if a single pass returns **≥ 80% RELEVANT**, force another pass
     even if the agent says "enough" — there may be more updates to find.
 - **Memory / Learnings (PLANNED, not yet implemented):** reviewer feedback retrieved into the
   eval step. Generic "Memory/Learnings store" for now (leaning Azure AI Search to keep
@@ -89,7 +90,7 @@ flowchart TB
       CTRL{"10. Sufficiency / Loop Controller"}
 
       QR --> BING --> PF --> FT --> EVAL --> CTRL
-      CTRL -- "Need more: under per-group maxLoops (default 3) AND goal unmet<br/>OR override: over 80% of pass RELEVANT<br/>(re-query informed by in-memory search history)" --> QR
+      CTRL -- "Need more: under per-group maxLoops (default 3) AND goal unmet<br/>OR override: at least 80% of pass RELEVANT<br/>(re-query informed by in-memory search history)" --> QR
     end
 
     CTRL -- "Sufficient OR maxLoops reached" --> ROUTE{"11. Verdict Routing (in-memory)"}
@@ -132,9 +133,9 @@ flowchart TB
 | 6 | Deterministic Pre-filter | Non-LLM: dedupe (incl. across topic groups) + URL reachability/validity, before any fetch. |
 | 7 | Full-text Fetch & Clean | Fetch HTML/PDF, strip boilerplate; if fetch fails, fall back to Bing summary and flag the item "unverified" rather than dropping it. |
 | 8 | Memory / Learnings store | **Planned.** Curated guidance rules (+ raw comments), scoped to jurisdiction + topic group, retrieved into the eval. |
-| — | Search History (this run) | *Not shown as a separate node — it's inherent to the loop.* Per-topic-group, **in-memory only** (not persisted) for the duration of the run — e.g. a JSON object with `searchQueries[]`, `vettedResults[]`, `discardedResults[]`, appended each pass. Feeds the query-synthesis agent (avoid redundant queries) and the eval agent (coverage assessment, skip duplicates). Distinct from the planned cross-run Memory/Learnings store (#8). |
+| — | Search History (this run) | *Not shown as a separate node — it's inherent to the loop.* Per-topic-group, **in-memory only** (not a queryable DB store) for the duration of the run — e.g. a JSON object with `searchQueries[]`, `vettedResults[]`, `discardedResults[]`, appended each pass. Feeds the query-synthesis agent (avoid redundant queries) and the eval agent (coverage assessment, skip duplicates). Distinct from the planned cross-run Memory/Learnings store (#8). A read-only **snapshot** of this history is (a) checkpointed for resumability and (b) **returned on the run result / API** (`TopicGroupResult.History`) so the future Admin UI (#18) can replay each pass — query, hits, verdicts, and the loop reasoning. |
 | 9 | Full-text Relevance Eval (single call) | The merged Stage 1 + 1.5 relevance decision on full text; effective-date aware; consumes injected learnings and the run's search history for coverage. One LLM eval per item. |
-| 10 | Sufficiency / Loop Controller | Continue if under per-group `maxLoops` (default 3, tunable per topic group) and goal unmet; exit when satisfied — **override**: re-loop if a pass is >80% RELEVANT. |
+| 10 | Sufficiency / Loop Controller | Continue if under per-group `maxLoops` (default 3, tunable per topic group) and goal unmet; exit when satisfied — **override**: re-loop if a pass is **≥80% RELEVANT** (boundary inclusive). |
 | 11 | Verdict Routing (in-memory) | Not a separate service call — just the in-memory decision of what to send on to step 12 based on each item's verdict. **RELEVANT** and **BORDERLINE** are both carried forward into enrichment; BORDERLINE items are kept but **flagged in the internal data structure** (so they're visible/auditable downstream) rather than blocking on a human. **NOT_RELEVANT** is dropped (logged for audit). |
 | 12 | Content Analysis / Enrichment | Former Stage 1.5, now enrichment-only (whatItDoes, metadata) since relevance moved into the loop. |
 | 13 | Categorize Agent (Stage 2) | Impact area, regulator, approved tag selection. |

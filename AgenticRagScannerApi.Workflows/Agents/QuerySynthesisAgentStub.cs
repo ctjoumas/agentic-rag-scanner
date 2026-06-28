@@ -16,7 +16,7 @@ public sealed class QuerySynthesisAgentStub : IQuerySynthesisAgent
 
     public QuerySynthesisAgentStub(ILogger<QuerySynthesisAgentStub> logger) => _logger = logger;
 
-    public Task<string> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
+    public Task<QuerySynthesisResult> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
     {
         var pass = context.LoopCount + 1;
         var keywords = context.TopicGroup.Keywords;
@@ -27,7 +27,8 @@ public sealed class QuerySynthesisAgentStub : IQuerySynthesisAgent
             QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass);
 
         var query = $"{primary} {context.Run.Jurisdiction} update (pass {pass})";
+        var rationale = $"Stub: canned keyword query for pass {pass} (no model call).";
 
-        return Task.FromResult(query);
+        return Task.FromResult(new QuerySynthesisResult(query, rationale));
     }
 }
