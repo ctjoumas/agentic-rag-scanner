@@ -28,15 +28,7 @@ $commonArgs = @(
     '--app-insights',           $env:APPINSIGHTSNAME
 )
 
-# 1. Grant roles to the signed-in user (required for local dev with DefaultAzureCredential).
-Write-Host "`n--- Granting roles to signed-in user ---" -ForegroundColor Cyan
-& dotnet run --project $projectPath -- @commonArgs
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "RBAC setup for signed-in user failed (exit code $LASTEXITCODE)."
-    exit $LASTEXITCODE
-}
-
-# 2. Grant Foundry roles to the Foundry account (resource) managed identity.
+# 1. Grant Foundry roles to the Foundry account (resource) managed identity first.
 $foundryResourceMi = $null
 if ($env:FOUNDRYNAME) {
     $foundryScope = "/subscriptions/$($env:AZURE_SUBSCRIPTION_ID)/resourceGroups/$($env:AZURE_RESOURCE_GROUP)/providers/Microsoft.CognitiveServices/accounts/$($env:FOUNDRYNAME)"
@@ -64,6 +56,14 @@ if ($env:FOUNDRYNAME) {
             }
         }
     }
+}
+
+# 2. Grant roles to the signed-in user (required for local dev with DefaultAzureCredential).
+Write-Host "`n--- Granting roles to signed-in user ---" -ForegroundColor Cyan
+& dotnet run --project $projectPath -- @commonArgs
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "RBAC setup for signed-in user failed (exit code $LASTEXITCODE)."
+    exit $LASTEXITCODE
 }
 
 # 3. Grant roles to the Foundry project's managed identity when available.

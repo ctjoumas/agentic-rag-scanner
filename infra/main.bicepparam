@@ -8,7 +8,7 @@ param tags = {
   project: 'agentic-rag-scanner'
 }
 
-param cosmosDatabaseName = 'agentic-rag-scanner'
-param cosmosContainerName = 'results'
-param deployFoundryProject = false
-param foundryProjectName = 'default'
+param cosmosDatabaseName = 'agentic-rag-scanner-db'
+param cosmosContainerName = 'agentic-rag-scanner-container'
+param deployFoundryProject = true
+param foundryProjectName = 'agentic-rag-scanner-project'

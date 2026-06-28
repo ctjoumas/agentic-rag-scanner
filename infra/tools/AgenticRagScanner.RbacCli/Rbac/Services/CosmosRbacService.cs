@@ -70,11 +70,31 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
                 accountName,
                 "--resource-group",
                 resourceGroup,
-                "--query",
-                $"[?principalId=='{principalId}' && contains(roleDefinitionId, '{roleId}')]",
             ]);
 
-        if (Ok && Json.HasValue && Json.Value.ValueKind == JsonValueKind.Array && Json.Value.GetArrayLength() > 0)
+        bool roleAlreadyAssigned = false;
+        if (Ok && Json.HasValue && Json.Value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement assignment in Json.Value.EnumerateArray())
+            {
+                string assignmentPrincipalId = assignment.TryGetProperty("principalId", out JsonElement principalElement)
+                    ? principalElement.GetString() ?? string.Empty
+                    : string.Empty;
+
+                string roleDefinitionId = assignment.TryGetProperty("roleDefinitionId", out JsonElement roleElement)
+                    ? roleElement.GetString() ?? string.Empty
+                    : string.Empty;
+
+                if (string.Equals(assignmentPrincipalId, principalId, StringComparison.OrdinalIgnoreCase) &&
+                    roleDefinitionId.Contains(roleId, StringComparison.OrdinalIgnoreCase))
+                {
+                    roleAlreadyAssigned = true;
+                    break;
+                }
+            }
+        }
+
+        if (roleAlreadyAssigned)
         {
             RbacExecutionContext.PrintWarning($"'{CosmosCustomRoleName}' already assigned");
             return;
@@ -125,18 +145,31 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
                 accountName,
                 "--resource-group",
                 resourceGroup,
-                "--query",
-                $"[?roleName=='{CosmosCustomRoleName}']",
             ]);
 
-        if (Ok && Json.HasValue && Json.Value.ValueKind == JsonValueKind.Array && Json.Value.GetArrayLength() > 0)
+        if (Ok && Json.HasValue && Json.Value.ValueKind == JsonValueKind.Array)
         {
-            JsonElement first = Json.Value.EnumerateArray().First();
-            string roleId = first.TryGetProperty("name", out JsonElement roleIdElement)
-                ? roleIdElement.GetString() ?? string.Empty
-                : string.Empty;
-            RbacExecutionContext.PrintWarning($"Cosmos role '{CosmosCustomRoleName}' already exists - reusing");
-            return roleId;
+            foreach (JsonElement definition in Json.Value.EnumerateArray())
+            {
+                string roleName = definition.TryGetProperty("roleName", out JsonElement roleNameElement)
+                    ? roleNameElement.GetString() ?? string.Empty
+                    : string.Empty;
+
+                if (!string.Equals(roleName, CosmosCustomRoleName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string roleId = definition.TryGetProperty("name", out JsonElement roleIdElement)
+                    ? roleIdElement.GetString() ?? string.Empty
+                    : string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(roleId))
+                {
+                    RbacExecutionContext.PrintWarning($"Cosmos role '{CosmosCustomRoleName}' already exists - reusing");
+                    return roleId;
+                }
+            }
         }
 
         var roleBody = new

@@ -31,12 +31,7 @@ run_setup() {
         "$@"
 }
 
-# 1. Signed-in user (required for local dev with DefaultAzureCredential).
-echo ""
-echo "--- Granting roles to signed-in user ---"
-run_setup
-
-# 2. Grant Foundry roles to the Foundry account (resource) managed identity.
+    # 1. Grant Foundry roles to the Foundry account (resource) managed identity first.
 if [ -n "${FOUNDRYNAME:-}" ]; then
     FOUNDRY_SCOPE="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.CognitiveServices/accounts/${FOUNDRYNAME}"
     FOUNDRY_RESOURCE_MI="$(az cognitiveservices account show --name "$FOUNDRYNAME" --resource-group "$AZURE_RESOURCE_GROUP" --query identity.principalId -o tsv 2>/dev/null || true)"
@@ -59,6 +54,11 @@ if [ -n "${FOUNDRYNAME:-}" ]; then
         done
     fi
 fi
+
+# 2. Signed-in user (required for local dev with DefaultAzureCredential).
+echo ""
+echo "--- Granting roles to signed-in user ---"
+run_setup
 
 # 3. Foundry project's managed identity.
 FOUNDRY_PROJECT_MI="${FOUNDRYPROJECTPRINCIPALID:-}"

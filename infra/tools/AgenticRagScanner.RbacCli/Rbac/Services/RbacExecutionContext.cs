@@ -5,6 +5,8 @@ namespace AgenticRagScanner.RbacCli.Rbac.Services;
 
 internal sealed class RbacExecutionContext
 {
+    private const int CommandTimeoutMs = 180000;
+
     public string PrincipalType { get; set; } = "ServicePrincipal";
 
     public static CommandResult RunCommand(IReadOnlyList<string> args, bool capture)
@@ -45,11 +47,44 @@ internal sealed class RbacExecutionContext
         string stdErr = string.Empty;
         if (capture)
         {
-            stdOut = process.StandardOutput.ReadToEnd();
-            stdErr = process.StandardError.ReadToEnd();
+            Task<string> readStdOutTask = process.StandardOutput.ReadToEndAsync();
+            Task<string> readStdErrTask = process.StandardError.ReadToEndAsync();
+
+            if (!process.WaitForExit(CommandTimeoutMs))
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // Ignore kill race and return timeout error below.
+                }
+
+                return new CommandResult(124, string.Empty, $"Command timed out after {CommandTimeoutMs / 1000}s: {string.Join(' ', args)}");
+            }
+
+            Task.WaitAll(readStdOutTask, readStdErrTask);
+            stdOut = readStdOutTask.Result;
+            stdErr = readStdErrTask.Result;
+        }
+        else
+        {
+            if (!process.WaitForExit(CommandTimeoutMs))
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // Ignore kill race and return timeout error below.
+                }
+
+                return new CommandResult(124, string.Empty, $"Command timed out after {CommandTimeoutMs / 1000}s: {string.Join(' ', args)}");
+            }
         }
 
-        process.WaitForExit();
         return new CommandResult(process.ExitCode, stdOut, stdErr);
     }
 
