@@ -24,8 +24,9 @@ internal sealed class RbacRunner
             principalId = options.PrincipalId;
             assigneeIsObjectId = true;
             context.PrincipalType = options.PrincipalType;
+            string label = string.IsNullOrWhiteSpace(options.PrincipalName) ? principalId : $"{options.PrincipalName} ({principalId})";
             RbacExecutionContext.PrintSection("Target principal");
-            RbacExecutionContext.PrintSuccess($"Granting roles to {options.PrincipalType}: {principalId}");
+            RbacExecutionContext.PrintSuccess($"Granting roles to {options.PrincipalType}: {label}");
         }
         else
         {
