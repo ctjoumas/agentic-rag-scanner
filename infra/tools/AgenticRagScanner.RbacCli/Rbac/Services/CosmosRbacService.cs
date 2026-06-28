@@ -5,6 +5,8 @@ namespace AgenticRagScanner.RbacCli.Rbac.Services;
 internal sealed class CosmosRbacService(RbacExecutionContext context)
 {
     private const string CosmosCustomRoleName = "CosmosDB-DataPlane-FullAccess";
+    private const int MaxAttempts = 5;
+    private const int RetryDelayMs = 3000;
     private static readonly string[] CosmosCustomRoleDataActions =
     [
         "Microsoft.DocumentDB/databaseAccounts/readMetadata",
@@ -58,7 +60,7 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
             return;
         }
 
-        var (Ok, Json, Message) = RbacExecutionContext.RunJson(
+        var (Ok, Json, Message) = RunJsonWithRetry(
             [
                 "az",
                 "cosmosdb",
@@ -100,7 +102,7 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
             return;
         }
 
-        var create = RbacExecutionContext.RunJson(
+        var create = RunJsonWithRetry(
             [
                 "az",
                 "cosmosdb",
@@ -124,6 +126,11 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
         {
             RbacExecutionContext.PrintSuccess($"Assigned '{CosmosCustomRoleName}' (data-plane)");
         }
+        else if (create.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase) ||
+                 create.Message.Contains("conflict", StringComparison.OrdinalIgnoreCase))
+        {
+            RbacExecutionContext.PrintWarning($"'{CosmosCustomRoleName}' already assigned");
+        }
         else
         {
             RbacExecutionContext.PrintError($"Failed to assign Cosmos DB data role: {create.Message}");
@@ -133,7 +140,7 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
 
     private string EnsureCosmosRoleDefinition(string resourceGroup, string accountName)
     {
-        var (Ok, Json, Message) = RbacExecutionContext.RunJson(
+        var (Ok, Json, Message) = RunJsonWithRetry(
             [
                 "az",
                 "cosmosdb",
@@ -191,7 +198,7 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
 
         try
         {
-            var create = RbacExecutionContext.RunJson(
+            var create = RunJsonWithRetry(
                 [
                     "az",
                     "cosmosdb",
@@ -209,6 +216,13 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
 
             if (!create.Ok || !create.Json.HasValue)
             {
+                if (create.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase) ||
+                    create.Message.Contains("BadRequest", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Another concurrent run may have created the role; re-query and reuse.
+                    return EnsureCosmosRoleDefinition(resourceGroup, accountName);
+                }
+
                 RbacExecutionContext.PrintError($"Failed to create Cosmos role definition: {create.Message}");
                 return string.Empty;
             }
@@ -224,6 +238,39 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
                 File.Delete(tempFilePath);
             }
         }
+    }
+
+    private static (bool Ok, JsonElement? Json, string Message) RunJsonWithRetry(IReadOnlyList<string> args)
+    {
+        (bool Ok, JsonElement? Json, string Message) last = (false, null, "Unknown error");
+
+        for (int attempt = 1; attempt <= MaxAttempts; attempt++)
+        {
+            last = RbacExecutionContext.RunJson(args);
+            if (last.Ok)
+            {
+                return last;
+            }
+
+            if (!IsTransient(last.Message) || attempt == MaxAttempts)
+            {
+                return last;
+            }
+
+            Thread.Sleep(RetryDelayMs * attempt);
+        }
+
+        return last;
+    }
+
+    private static bool IsTransient(string message)
+    {
+        return message.Contains("TooManyRequests", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("temporarily unavailable", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("InternalServerError", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("connection", StringComparison.OrdinalIgnoreCase);
     }
 }
 
