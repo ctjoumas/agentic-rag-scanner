@@ -16,8 +16,20 @@ internal sealed class StorageRbacService(RbacExecutionContext context)
         }
 
         var (Ok, Json, Message) = RbacExecutionContext.RunJson(["az", "storage", "account", "show", "--name", accountName, "--resource-group", resourceGroup]);
-        string saId = Ok && Json.HasValue ? RbacExecutionContext.GetString(Json.Value, "id") ?? string.Empty : string.Empty;
-        string blobEndpoint = Ok && Json.HasValue ? RbacExecutionContext.GetString(Json.Value, "primaryEndpoints", "blob") ?? string.Empty : string.Empty;
+        if (!Ok || !Json.HasValue)
+        {
+            RbacExecutionContext.PrintError($"Could not retrieve Storage account '{accountName}': {Message}");
+            return;
+        }
+
+        string saId = RbacExecutionContext.GetString(Json.Value, "id") ?? string.Empty;
+        string blobEndpoint = RbacExecutionContext.GetString(Json.Value, "primaryEndpoints", "blob") ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(saId))
+        {
+            RbacExecutionContext.PrintError($"Could not resolve Storage account id for '{accountName}'.");
+            return;
+        }
 
         _armRoles.AssignArmRole("Storage Blob Data Contributor", saId, principalId, accountName, assigneeIsObjectId);
 
