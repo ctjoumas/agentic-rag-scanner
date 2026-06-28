@@ -1,4 +1,4 @@
-@description('Azure region for Microsoft Foundry account.')
+@description('Azure region for Azure AI Foundry account.')
 param location string
 
 @description('Microsoft Foundry account name.')
