@@ -217,7 +217,8 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
             if (!create.Ok || !create.Json.HasValue)
             {
                 if (create.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase) ||
-                    create.Message.Contains("BadRequest", StringComparison.OrdinalIgnoreCase))
+                    create.Message.Contains("RoleDefinitionExists", StringComparison.OrdinalIgnoreCase) ||
+                    create.Message.Contains("Conflict", StringComparison.OrdinalIgnoreCase))
                 {
                     // Another concurrent run may have created the role; re-query and reuse.
                     return EnsureCosmosRoleDefinition(resourceGroup, accountName);
