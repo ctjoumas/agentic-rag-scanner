@@ -42,7 +42,7 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
             _armRoles.AssignArmRole("DocumentDB Account Contributor", cosmosId, principalId, accountName, assigneeIsObjectId);
         }
 
-        AssignCosmosDataRole(resourceGroup, accountName, principalId, subscriptionId);
+        AssignCosmosDataRole(resourceGroup, accountName, principalId);
 
         if (!string.IsNullOrWhiteSpace(endpoint))
         {
@@ -52,7 +52,7 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
         }
     }
 
-    private void AssignCosmosDataRole(string resourceGroup, string accountName, string principalId, string subscriptionId)
+    private void AssignCosmosDataRole(string resourceGroup, string accountName, string principalId)
     {
         string roleId = EnsureCosmosRoleDefinition(resourceGroup, accountName);
         if (string.IsNullOrWhiteSpace(roleId))
