@@ -42,12 +42,18 @@ if [ -n "${FOUNDRYNAME:-}" ]; then
         azd env set FOUNDRYRESOURCEPRINCIPALID "$FOUNDRY_RESOURCE_MI" >/dev/null
 
         for ROLE in "Azure AI Developer" "53ca6127-db72-4b80-b1b0-d745d6d5456d" "Cognitive Services OpenAI User"; do
-            OUTPUT="$(az role assignment create --scope "$FOUNDRY_SCOPE" --assignee-object-id "$FOUNDRY_RESOURCE_MI" --assignee-principal-type ServicePrincipal --role "$ROLE" 2>&1 || true)"
-            if echo "$OUTPUT" | grep -q "RoleAssignmentExists"; then
-                echo "  [OK] '$ROLE' already assigned on $FOUNDRYNAME"
-            elif [ -n "$OUTPUT" ] && echo "$OUTPUT" | grep -qi "error"; then
-                echo "ERROR: Failed to assign '$ROLE' to Foundry resource MI. $OUTPUT" >&2
-                exit 1
+            set +e
+            OUTPUT="$(az role assignment create --scope "$FOUNDRY_SCOPE" --assignee-object-id "$FOUNDRY_RESOURCE_MI" --assignee-principal-type ServicePrincipal --role "$ROLE" 2>&1)"
+            EXIT_CODE=$?
+            set -e
+
+            if [ "$EXIT_CODE" -ne 0 ]; then
+                if echo "$OUTPUT" | grep -q "RoleAssignmentExists"; then
+                    echo "  [OK] '$ROLE' already assigned on $FOUNDRYNAME"
+                else
+                    echo "ERROR: Failed to assign '$ROLE' to Foundry resource MI. $OUTPUT" >&2
+                    exit 1
+                fi
             else
                 echo "  [OK] Assigned '$ROLE' on $FOUNDRYNAME"
             fi
