@@ -24,6 +24,7 @@ run_setup() {
         --cosmos-account         "$COSMOSACCOUNTNAME" \
         --storage-account        "$STORAGEACCOUNTNAME" \
         --foundry-account        "$FOUNDRYNAME" \
+        --foundry-project        "$FOUNDRYPROJECTNAME" \
         --app-config-store       "$APPCONFIGSTORENAME" \
         --key-vault              "$KEYVAULTNAME" \
         --app-insights           "$APPINSIGHTSNAME" \
@@ -35,14 +36,49 @@ echo ""
 echo "--- Granting roles to signed-in user ---"
 run_setup
 
-# 2. Foundry project's managed identity.
-if [ -n "${FOUNDRYPROJECTPRINCIPALID:-}" ]; then
-    echo ""
-    echo "--- Granting roles to Foundry project managed identity ---"
-    run_setup --principal-id "$FOUNDRYPROJECTPRINCIPALID" --principal-name "Foundry project MI"
+# 2. Grant Foundry roles to the Foundry account (resource) managed identity.
+if [ -n "${FOUNDRYNAME:-}" ]; then
+    FOUNDRY_SCOPE="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.CognitiveServices/accounts/${FOUNDRYNAME}"
+    FOUNDRY_RESOURCE_MI="$(az cognitiveservices account show --name "$FOUNDRYNAME" --resource-group "$AZURE_RESOURCE_GROUP" --query identity.principalId -o tsv 2>/dev/null || true)"
+
+    if [ -n "$FOUNDRY_RESOURCE_MI" ]; then
+        echo ""
+        echo "--- Granting roles to Foundry resource managed identity ---"
+        azd env set FOUNDRYRESOURCEPRINCIPALID "$FOUNDRY_RESOURCE_MI" >/dev/null
+
+        for ROLE in "Azure AI Developer" "53ca6127-db72-4b80-b1b0-d745d6d5456d" "Cognitive Services OpenAI User"; do
+            OUTPUT="$(az role assignment create --scope "$FOUNDRY_SCOPE" --assignee-object-id "$FOUNDRY_RESOURCE_MI" --assignee-principal-type ServicePrincipal --role "$ROLE" 2>&1 || true)"
+            if echo "$OUTPUT" | grep -q "RoleAssignmentExists"; then
+                echo "  [OK] '$ROLE' already assigned on $FOUNDRYNAME"
+            elif [ -n "$OUTPUT" ] && echo "$OUTPUT" | grep -qi "error"; then
+                echo "ERROR: Failed to assign '$ROLE' to Foundry resource MI. $OUTPUT" >&2
+                exit 1
+            else
+                echo "  [OK] Assigned '$ROLE' on $FOUNDRYNAME"
+            fi
+        done
+    fi
 fi
 
-# 3. Optional extra principal via azd env var.
+# 3. Foundry project's managed identity.
+FOUNDRY_PROJECT_MI="${FOUNDRYPROJECTPRINCIPALID:-}"
+
+# Resolve and persist when bicep output is empty.
+if [ -z "$FOUNDRY_PROJECT_MI" ] && [ -n "${FOUNDRYPROJECTNAME:-}" ] && [ -n "${FOUNDRYNAME:-}" ]; then
+    PROJECT_RESOURCE_ID="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.CognitiveServices/accounts/${FOUNDRYNAME}/projects/${FOUNDRYPROJECTNAME}"
+    FOUNDRY_PROJECT_MI="$(az resource show --ids "$PROJECT_RESOURCE_ID" --query identity.principalId -o tsv 2>/dev/null || true)"
+    if [ -n "$FOUNDRY_PROJECT_MI" ]; then
+        azd env set FOUNDRYPROJECTPRINCIPALID "$FOUNDRY_PROJECT_MI" >/dev/null
+    fi
+fi
+
+if [ -n "$FOUNDRY_PROJECT_MI" ]; then
+    echo ""
+    echo "--- Granting roles to Foundry project managed identity ---"
+    run_setup --principal-id "$FOUNDRY_PROJECT_MI" --principal-name "Foundry project MI"
+fi
+
+# 4. Optional extra principal via azd env var.
 if [ -n "${AZURE_RBAC_PRINCIPAL_ID:-}" ]; then
     NAME="${AZURE_RBAC_PRINCIPAL_NAME:-azd-configured principal}"
     echo ""

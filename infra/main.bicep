@@ -13,17 +13,20 @@ param cosmosDatabaseName string = 'agentic-rag-scanner'
 @description('Name of the SQL container in Cosmos DB.')
 param cosmosContainerName string = 'results'
 
-@description('Optional Foundry project managed identity principal ID. Leave empty to skip MI RBAC in postprovision.')
-param foundryProjectPrincipalId string = ''
+@description('Create a Foundry project under the Foundry account.')
+param deployFoundryProject bool = false
+
+@description('Foundry project name when deployFoundryProject is true.')
+param foundryProjectName string = ''
 
 var suffix = toLower(substring(uniqueString(subscription().id, resourceGroup().id), 0, 6))
 var compactBaseName = toLower(replace(baseName, '-', ''))
 
-var storageAccountName = substring('${compactBaseName}${suffix}st', 0, 24)
-var cosmosAccountName = substring('${compactBaseName}-${suffix}-cosmos', 0, 44)
-var foundryAccountName = substring('${compactBaseName}-${suffix}-foundry', 0, 64)
-var keyVaultName = substring('${compactBaseName}-${suffix}-kv', 0, 24)
-var appConfigStoreName = substring('${compactBaseName}-${suffix}-appcs', 0, 50)
+var storageAccountName = take('${compactBaseName}${suffix}st', 24)
+var cosmosAccountName = take('${compactBaseName}-${suffix}-cosmos', 44)
+var foundryAccountName = take('${compactBaseName}-${suffix}-foundry', 64)
+var keyVaultName = take('${compactBaseName}-${suffix}-kv', 24)
+var appConfigStoreName = take('${compactBaseName}-${suffix}-appcs', 50)
 var appInsightsName = '${baseName}-${suffix}-appi'
 var logAnalyticsWorkspaceName = '${baseName}-${suffix}-law'
 
@@ -52,6 +55,8 @@ module foundryModule './modules/foundry.bicep' = {
   params: {
     location: location
     accountName: foundryAccountName
+    deployProject: deployFoundryProject
+    projectName: foundryProjectName
     tags: tags
   }
 }
@@ -91,7 +96,8 @@ output foundryName string = foundryModule.outputs.foundryName
 output keyVaultName string = keyVaultModule.outputs.keyVaultName
 output appInsightsName string = appInsightsModule.outputs.appInsightsName
 output appConfigStoreName string = appConfigModule.outputs.appConfigStoreName
-output foundryProjectPrincipalId string = foundryProjectPrincipalId
+output foundryProjectName string = foundryModule.outputs.foundryProjectName
+output foundryProjectPrincipalId string = foundryModule.outputs.foundryProjectPrincipalId
 
 output cosmosEndpoint string = cosmosModule.outputs.cosmosEndpoint
 output storageBlobEndpoint string = storageModule.outputs.storageBlobEndpoint

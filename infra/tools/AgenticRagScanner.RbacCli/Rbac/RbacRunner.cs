@@ -86,7 +86,7 @@ internal sealed class RbacRunner
             RbacExecutionContext.PrintSkip("Microsoft Foundry");
         }
 
-        string? foundryProject = PromptIfMissing(options.FoundryProject, "Foundry project name (for KB MCP runtime roles)");
+        string? foundryProject = options.FoundryProject?.Trim();
         if (!string.IsNullOrWhiteSpace(foundryProject))
         {
             foundryProjectIdentityRbac.Configure(resourceGroup, foundryProject, foundryAccount, subscriptionId);
@@ -340,13 +340,28 @@ internal sealed class RbacRunner
 
         if (!ok || string.IsNullOrWhiteSpace(uid))
         {
-            if (!string.IsNullOrWhiteSpace(err))
+            bool caeFailure = IsCaeFailure(err);
+            if (!string.IsNullOrWhiteSpace(err) && !caeFailure)
             {
                 RbacExecutionContext.PrintDetail(err);
             }
+            else if (caeFailure)
+            {
+                RbacExecutionContext.PrintWarning("Could not resolve signed-in user object ID due Conditional Access token challenge.");
+            }
 
-            RbacExecutionContext.PrintError("Could not retrieve signed-in user object ID. Are you logged in as a user (not a service principal)?");
-            throw new InvalidOperationException("Could not retrieve signed-in user object ID.");
+            // Fallback for CAE/Graph challenges: use the signed-in user principal name.
+            var accountUser = RbacExecutionContext.RunCommand(["az", "account", "show", "--only-show-errors", "--query", "user.name", "-o", "tsv"], capture: true);
+            string upn = accountUser.StdOut.Trim();
+            if (!string.IsNullOrWhiteSpace(upn))
+            {
+                RbacExecutionContext.PrintWarning("Using signed-in user principal name for RBAC assignment.");
+                RbacExecutionContext.PrintSuccess($"User principal: {upn}");
+                return upn;
+            }
+
+            RbacExecutionContext.PrintError("Could not retrieve signed-in user identity.");
+            throw new InvalidOperationException("Could not retrieve signed-in user identity.");
         }
 
         RbacExecutionContext.PrintSuccess($"User object ID: {uid}");
@@ -355,7 +370,7 @@ internal sealed class RbacRunner
 
     private static (bool Ok, string UserId, string Error) TryLookupSignedInUser(RbacExecutionContext context)
     {
-        var result = RbacExecutionContext.RunCommand(["az", "ad", "signed-in-user", "show", "--query", "id", "-o", "tsv"], capture: true);
+        var result = RbacExecutionContext.RunCommand(["az", "ad", "signed-in-user", "show", "--only-show-errors", "--query", "id", "-o", "tsv"], capture: true);
         return (result.ExitCode == 0, result.StdOut.Trim(), result.StdErr.Trim());
     }
 }
