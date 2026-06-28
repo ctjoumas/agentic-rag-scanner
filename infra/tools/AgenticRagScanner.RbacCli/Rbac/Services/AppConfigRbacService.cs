@@ -16,8 +16,20 @@ internal sealed class AppConfigRbacService(RbacExecutionContext context)
         }
 
         var (Ok, Json, Message) = RbacExecutionContext.RunJson(["az", "appconfig", "show", "--name", storeName, "--resource-group", resourceGroup]);
-        string configId = Ok && Json.HasValue ? RbacExecutionContext.GetString(Json.Value, "id") ?? string.Empty : string.Empty;
-        string endpoint = Ok && Json.HasValue ? RbacExecutionContext.GetString(Json.Value, "endpoint") ?? string.Empty : string.Empty;
+        if (!Ok || !Json.HasValue)
+        {
+            RbacExecutionContext.PrintError($"Could not retrieve App Configuration store '{storeName}': {Message}");
+            return;
+        }
+
+        string configId = RbacExecutionContext.GetString(Json.Value, "id") ?? string.Empty;
+        string endpoint = RbacExecutionContext.GetString(Json.Value, "endpoint") ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(configId))
+        {
+            RbacExecutionContext.PrintError($"Could not resolve App Configuration store resource ID for '{storeName}'.");
+            return;
+        }
 
         _armRoles.AssignArmRole("App Configuration Data Reader", configId, principalId, storeName, assigneeIsObjectId);
 
