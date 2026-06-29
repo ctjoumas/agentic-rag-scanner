@@ -1,8 +1,6 @@
+using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
-using AgenticRagScannerApi.Workflows;
 using FluentAssertions;
-using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AgenticRagScannerApi.Tests;
 
@@ -18,30 +16,10 @@ public class TopicGroupWorkflowTests
     public async Task Workflow_RunsToMaxLoops_YieldsResult_AndCreatesCheckpoints()
     {
         var context = WorkflowTestFactory.CreateContext(maxLoops: 2, allowlist: ["https://www.gov.uk"]);
-        var pipeline = WorkflowTestFactory.CreatePipeline();
-        var workflow = TopicGroupWorkflow.Build(context, pipeline, NullLoggerFactory.Instance);
-        var checkpointManager = CheckpointManager.CreateInMemory();
 
-        var run = await InProcessExecution.RunStreamingAsync(workflow, TopicGroupWorkflow.StartSignal, checkpointManager);
+        var (result, checkpoints) = await WorkflowTestFactory.RunToCompletionAsync(context);
 
-        TopicGroupResult? result = null;
-        var checkpoints = 0;
-        await foreach (var workflowEvent in run.WatchStreamAsync())
-        {
-            switch (workflowEvent)
-            {
-                case WorkflowOutputEvent output when output.Data is TopicGroupResult topicGroupResult:
-                    result = topicGroupResult;
-                    break;
-
-                case SuperStepCompletedEvent superStep when superStep.CompletionInfo?.Checkpoint is not null:
-                    checkpoints++;
-                    break;
-            }
-        }
-
-        result.Should().NotBeNull();
-        result!.LoopCount.Should().Be(2);
+        result.LoopCount.Should().Be(2);
         result.Status.Should().Be("Completed");
         result.Items.Should().NotBeEmpty();
         checkpoints.Should().BeGreaterThan(0);
@@ -51,5 +29,32 @@ public class TopicGroupWorkflowTests
         result.History.Should().NotBeNull();
         result.History!.Passes.Should().HaveCount(result.LoopCount);
         result.History.Passes.Should().OnlyContain(p => !string.IsNullOrWhiteSpace(p.Query) && p.Review != null);
+    }
+
+    [Fact]
+    public async Task Workflow_LoopsToMaxLoops_AndFinalizesOnTheLastPass()
+    {
+        var context = WorkflowTestFactory.CreateContext(maxLoops: 3, allowlist: ["https://www.gov.uk"]);
+
+        var (result, _) = await WorkflowTestFactory.RunToCompletionAsync(context);
+
+        // A pass is appended each loop until the maxLoops cap, and the controller finalizes the last one.
+        result.LoopCount.Should().Be(3);
+        result.History!.Passes.Should().HaveCount(3);
+        result.History.Passes[^1].Review!.FinalDecision.Should().Be(LoopDecision.Finalize);
+    }
+
+    [Fact]
+    public async Task Workflow_Finalize_CarriesVettedItems_AndEnrichesThem()
+    {
+        var context = WorkflowTestFactory.CreateContext(maxLoops: 1, allowlist: ["https://www.gov.uk"]);
+
+        var (result, _) = await WorkflowTestFactory.RunToCompletionAsync(context);
+
+        result.Items.Should().NotBeEmpty();
+        result.Items.Should().OnlyContain(i => i.Verdict == Verdict.Relevant || i.Verdict == Verdict.Borderline);
+        result.Items.Should().OnlyContain(i =>
+            i.WhatItDoes != null && i.ImpactArea != null && i.Regulator != null &&
+            i.Tags.Count > 0 && i.ImpactSummary != null);
     }
 }

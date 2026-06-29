@@ -1,11 +1,14 @@
 using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
+using AgenticRagScannerApi.Workflows;
 using AgenticRagScannerApi.Workflows.Agents;
 using AgenticRagScannerApi.Workflows.Configuration;
 using AgenticRagScannerApi.Workflows.Pipeline;
 using AgenticRagScannerApi.Workflows.Steps;
 using AgenticRagScannerApi.Workflows.Tools;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Agents.AI.Workflows;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Net;
 
@@ -41,22 +44,63 @@ internal static class WorkflowTestFactory
         return new TopicGroupContext { Run = run, TopicGroup = group };
     }
 
-    public static TopicGroupPipeline CreatePipeline() =>
-        new(
-            new QuerySynthesisAgentStub(NullLogger<QuerySynthesisAgentStub>.Instance),
-            new FakeWebSearchAgent(),
-            new PreFilterStep(NullLogger<PreFilterStep>.Instance),
-            new FetchAndCleanStep(
-                new StubHttpClientFactory(),
-                Options.Create(new FetchOptions()),
-                NullLogger<FetchAndCleanStep>.Instance),
-            new RelevanceEvalAgentStub(NullLogger<RelevanceEvalAgentStub>.Instance),
-            new LoopController(new StubFullTextStore(), NullLogger<LoopController>.Instance),
-            new VerdictRouting(NullLogger<VerdictRouting>.Instance),
-            new EnrichmentAgentStub(NullLogger<EnrichmentAgentStub>.Instance),
-            new CategorizeAgentStub(NullLogger<CategorizeAgentStub>.Instance),
-            new SummarizeImpactAgentStub(NullLogger<SummarizeImpactAgentStub>.Instance),
-            NullLogger<TopicGroupPipeline>.Instance);
+    /// <summary>
+    /// Builds and runs the topic group's MAF workflow end-to-end on the deterministic stubs (the same
+    /// graph the host runs), draining the event stream and returning the yielded result plus the number
+    /// of per-super-step checkpoints observed.
+    /// </summary>
+    public static async Task<(TopicGroupResult Result, int Checkpoints)> RunToCompletionAsync(TopicGroupContext context)
+    {
+        var workflow = TopicGroupWorkflow.Build(context, CreateServiceProvider());
+        var checkpointManager = CheckpointManager.CreateInMemory();
+
+        var run = await InProcessExecution.RunStreamingAsync(workflow, TopicGroupWorkflow.StartSignal, checkpointManager);
+
+        TopicGroupResult? result = null;
+        var checkpoints = 0;
+        await foreach (var workflowEvent in run.WatchStreamAsync())
+        {
+            switch (workflowEvent)
+            {
+                case WorkflowOutputEvent output when output.Data is TopicGroupResult topicGroupResult:
+                    result = topicGroupResult;
+                    break;
+
+                case SuperStepCompletedEvent superStep when superStep.CompletionInfo?.Checkpoint is not null:
+                    checkpoints++;
+                    break;
+            }
+        }
+
+        return (result ?? throw new InvalidOperationException("Workflow completed without yielding a result."), checkpoints);
+    }
+
+    /// <summary>
+    /// Builds a service provider with the 10 deterministic step/agent stubs (by interface) plus
+    /// logging, so <see cref="TopicGroupWorkflow.Build"/> can resolve each executor's dependencies via
+    /// <see cref="ActivatorUtilities"/> exactly as the host does.
+    /// </summary>
+    public static IServiceProvider CreateServiceProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddSingleton<IQuerySynthesisAgent>(sp => new QuerySynthesisAgentStub(sp.GetRequiredService<ILogger<QuerySynthesisAgentStub>>()));
+        services.AddSingleton<IWebSearchAgent, FakeWebSearchAgent>();
+        services.AddSingleton<IPreFilterStep>(sp => new PreFilterStep(sp.GetRequiredService<ILogger<PreFilterStep>>()));
+        services.AddSingleton<IFetchAndCleanStep>(sp => new FetchAndCleanStep(
+            new StubHttpClientFactory(),
+            Options.Create(new FetchOptions()),
+            sp.GetRequiredService<ILogger<FetchAndCleanStep>>()));
+        services.AddSingleton<IRelevanceEvalAgent>(sp => new RelevanceEvalAgentStub(sp.GetRequiredService<ILogger<RelevanceEvalAgentStub>>()));
+        services.AddSingleton<ILoopController>(sp => new LoopController(new StubFullTextStore(), sp.GetRequiredService<ILogger<LoopController>>()));
+        services.AddSingleton<IVerdictRouting>(sp => new VerdictRouting(sp.GetRequiredService<ILogger<VerdictRouting>>()));
+        services.AddSingleton<IEnrichmentAgent>(sp => new EnrichmentAgentStub(sp.GetRequiredService<ILogger<EnrichmentAgentStub>>()));
+        services.AddSingleton<ICategorizeAgent>(sp => new CategorizeAgentStub(sp.GetRequiredService<ILogger<CategorizeAgentStub>>()));
+        services.AddSingleton<ISummarizeImpactAgent>(sp => new SummarizeImpactAgentStub(sp.GetRequiredService<ILogger<SummarizeImpactAgentStub>>()));
+
+        return services.BuildServiceProvider();
+    }
 
     public static ResultItem Item(string url, Verdict verdict) =>
         new()

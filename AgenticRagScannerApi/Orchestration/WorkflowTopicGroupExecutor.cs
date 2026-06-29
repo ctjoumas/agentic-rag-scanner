@@ -3,14 +3,13 @@ using AgenticRagScannerApi.Core.Runtime;
 using AgenticRagScannerApi.Core.Throttling;
 using AgenticRagScannerApi.Workflows;
 using AgenticRagScannerApi.Workflows.Checkpointing;
-using AgenticRagScannerApi.Workflows.Pipeline;
 using Microsoft.Agents.AI.Workflows;
 
 namespace AgenticRagScannerApi.Orchestration;
 
 /// <summary>
-/// Epic 2 per-group executor: builds and runs the topic group's MAF workflow (one self-looping pass
-/// per super-step), checkpointing to Cosmos so a run is resumable, and returns its aggregated
+/// Epic 2 per-group executor: builds and runs the topic group's MAF workflow (the seven-executor
+/// agentic RAG loop), checkpointing to Cosmos so a run is resumable, and returns its aggregated
 /// <see cref="TopicGroupResult"/>. Replaces the Phase 1 <c>StubTopicGroupExecutor</c>. Outbound work
 /// funnels through the shared throttle (the seam Epic 3+ real LLM/Bing calls use), and logging is
 /// scoped to <c>runId</c>/<c>topicGroupId</c>.
@@ -19,23 +18,20 @@ public sealed class WorkflowTopicGroupExecutor : ITopicGroupExecutor
 {
     private static readonly JsonSerializerOptions s_checkpointOptions = new(JsonSerializerDefaults.General);
 
-    private readonly TopicGroupPipeline _pipeline;
+    private readonly IServiceProvider _serviceProvider;
     private readonly CosmosCheckpointStore _checkpointStore;
     private readonly ISharedThrottle _throttle;
-    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<WorkflowTopicGroupExecutor> _logger;
 
     public WorkflowTopicGroupExecutor(
-        TopicGroupPipeline pipeline,
+        IServiceProvider serviceProvider,
         CosmosCheckpointStore checkpointStore,
         ISharedThrottle throttle,
-        ILoggerFactory loggerFactory,
         ILogger<WorkflowTopicGroupExecutor> logger)
     {
-        _pipeline = pipeline;
+        _serviceProvider = serviceProvider;
         _checkpointStore = checkpointStore;
         _throttle = throttle;
-        _loggerFactory = loggerFactory;
         _logger = logger;
     }
 
@@ -67,7 +63,7 @@ public sealed class WorkflowTopicGroupExecutor : ITopicGroupExecutor
 
     private async Task<TopicGroupResult> RunWorkflowAsync(TopicGroupContext context, CancellationToken cancellationToken)
     {
-        var workflow = TopicGroupWorkflow.Build(context, _pipeline, _loggerFactory);
+        var workflow = TopicGroupWorkflow.Build(context, _serviceProvider);
         var checkpointManager = CheckpointManager.CreateJson(_checkpointStore, s_checkpointOptions);
 
         var run = await InProcessExecution
