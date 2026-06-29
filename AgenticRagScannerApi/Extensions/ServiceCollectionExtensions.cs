@@ -244,8 +244,7 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<ILogger<WebSearchAgent>>());
         });
 
-        // Loop composition + the MAF Cosmos checkpoint store.
-        services.AddSingleton<TopicGroupPipeline>();
+        // The MAF Cosmos checkpoint store.
         services.AddSingleton<CosmosCheckpointStore>();
 
         return services;

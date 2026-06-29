@@ -33,7 +33,7 @@ FinalizeAsync (once, on exit):
   VerdictRouting → Enrichment → Categorize → Summarize&Impact   (per carried item)
 ```
 
-The executor is intentionally a **thin adapter** over `TopicGroupPipeline`. This was a deliberate choice: the loop is unit-testable as plain C# without standing up a workflow.
+The executor was intentionally a **thin adapter** over `TopicGroupPipeline` — a deliberate choice so the loop was unit-testable as plain C# without standing up a workflow. (Both the executor and `TopicGroupPipeline` were removed in phase-7; the loop body now lives in the seven executors below, tested directly through the workflow — see [`TopicGroupWorkflowTests`](../tests/AgenticRagScannerApi.Tests/TopicGroupWorkflowTests.cs).)
 
 ### How this maps to MAF's execution model
 
