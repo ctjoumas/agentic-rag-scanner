@@ -69,8 +69,14 @@ execute the synthesized queries. A per-run, in-memory
 **search history** (`searchQueries[]`, `vettedResults[]`, `discardedResults[]`) feeds both query
 synthesis (to avoid redundant queries) and evaluation (to assess coverage).
 
-For full design details see [docs/horizon-scanner-architecture.md](docs/horizon-scanner-architecture.md)
-and [docs/architecture-context.md](docs/architecture-context.md).
+Each per-group workflow is built as a **seven-executor MAF graph** (Query Synthesis → Web Search →
+Pre-filter → Fetch & Clean → Relevance Eval → Loop Controller → Finalize), where the Loop Controller
+branches on a conditional edge — `Retry` loops back to Query Synthesis for another pass, `Finalize`
+exits to the Finalize tail. This decomposition enables mid-pass checkpoint resume.
+
+For full design details see [docs/horizon-scanner-architecture.md](docs/horizon-scanner-architecture.md),
+[docs/architecture-context.md](docs/architecture-context.md), and
+[docs/maf-executor-design.md](docs/maf-executor-design.md) (the executor decomposition).
 
 ---
 
@@ -80,7 +86,7 @@ and [docs/architecture-context.md](docs/architecture-context.md).
 |---------|---------|
 | `AgenticRagScannerApi` | ASP.NET Core Web API host — controller, orchestrator, services, DI wiring, configuration, and validation. |
 | `AgenticRagScannerApi.Core` | Shared domain contracts (`TopicGroup`, `RunContext`, `ResultItem`, verdict/authority enums), runtime types, and the shared-throttle abstraction. |
-| `AgenticRagScannerApi.Workflows` | MAF workflow scaffolding — agents, steps, pipeline, tools, prompts, and Cosmos-backed checkpointing. |
+| `AgenticRagScannerApi.Workflows` | The per-topic-group MAF workflow — the seven-executor agentic-RAG graph (with conditional loop-back), agents, steps, tools, prompts, and Cosmos-backed checkpointing. |
 | `tests/AgenticRagScannerApi.Tests` | xUnit test project. |
 | `docs/` | Architecture primers, implementation plan, and the epic/story backlog. |
 
@@ -196,6 +202,9 @@ complete — foundations & contracts, run lifecycle, MAF scaffolding, the first 
 Web Search agent, full-text fetch & clean with blob storage, and the **date-aware, three-verdict
 relevance evaluation with the real loop controller** (per-item verdict routing, full-text provenance
 snapshots, a ≥80%-RELEVANT recall override, and a loop-feedback steer back into query synthesis).
+The per-group loop has since been decomposed from a single self-looping executor into a
+**seven-executor MAF graph** with mid-pass checkpoint resume — see
+[docs/maf-executor-design.md](docs/maf-executor-design.md).
 Later epics cover enrichment & categorization, quality gates + Cosmos persistence, publish/export,
 and the future memory/review loop.
 
