@@ -27,7 +27,7 @@ internal static class CliParser
         var bingConfigurationPathOption = new Option<string?>("--bing-configuration-path", () => null);
         var foundryAccountNameOption = new Option<string?>("--foundry-account-name", () => Environment.GetEnvironmentVariable("FOUNDRYNAME"));
         var foundryProjectNameOption = new Option<string?>("--foundry-project-name", () => Environment.GetEnvironmentVariable("FOUNDRYPROJECTNAME"));
-        var connectionNameOption = new Option<string?>("--connection-name", () => "bing-custom-search");
+        var connectionNameOption = new Option<string?>("--connection-name", () => null);
         var connectionDisplayNameOption = new Option<string?>("--connection-display-name", () => "Bing Custom Search");
 
         var root = new RootCommand("Manage Bing Custom Search configurations and Foundry project connections.");
@@ -149,7 +149,7 @@ internal static class CliParser
                 BingAccountName = bingAccountName,
                 FoundryAccountName = foundryAccountName,
                 FoundryProjectName = foundryProjectName,
-                ConnectionName = connectionName ?? "bing-custom-search",
+                ConnectionName = connectionName ?? bingAccountName,
                 ConnectionDisplayName = connectionDisplayName ?? "Bing Custom Search",
             };
 

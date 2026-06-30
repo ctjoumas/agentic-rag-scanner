@@ -49,6 +49,25 @@ param deployFoundryProject bool = false
 @description('Foundry project name when deployFoundryProject is true.')
 param foundryProjectName string = ''
 
+@description('Create a Foundry OpenAI model deployment under the Foundry account.')
+param deployFoundryModelDeployment bool = false
+
+@description('Foundry OpenAI model deployment name.')
+param foundryModelDeploymentName string = ''
+
+@description('OpenAI model name to deploy in Foundry.')
+param foundryModelName string = 'gpt-5.4'
+
+@description('OpenAI model version to deploy in Foundry.')
+param foundryModelVersion string = ''
+
+@description('SKU name for the Foundry OpenAI model deployment.')
+param foundryModelDeploymentSkuName string = 'GlobalStandard'
+
+@description('SKU capacity for the Foundry OpenAI model deployment.')
+@minValue(1)
+param foundryModelDeploymentSkuCapacity int = 1
+
 @description('Create the Bing Custom Search resource used by the Foundry grounding agent.')
 param deployBingCustomSearch bool = false
 
@@ -91,6 +110,12 @@ module foundryModule './modules/foundry.bicep' = {
     accountName: foundryAccountName
     deployProject: deployFoundryProject
     projectName: foundryProjectName
+    deployModelDeployment: deployFoundryModelDeployment
+    modelDeploymentName: foundryModelDeploymentName
+    modelName: foundryModelName
+    modelVersion: foundryModelVersion
+    modelDeploymentSkuName: foundryModelDeploymentSkuName
+    modelDeploymentSkuCapacity: foundryModelDeploymentSkuCapacity
     tags: tags
   }
 }
@@ -142,6 +167,7 @@ output appInsightsName string = appInsightsModule.outputs.appInsightsName
 output appConfigStoreName string = appConfigModule.outputs.appConfigStoreName
 output foundryProjectName string = foundryModule.outputs.foundryProjectName
 output foundryProjectPrincipalId string = foundryModule.outputs.foundryProjectPrincipalId
+output foundryDeployedModelDeploymentName string = foundryModule.outputs.foundryModelDeploymentName
 
 output cosmosEndpoint string = cosmosModule.outputs.cosmosEndpoint
 output storageBlobEndpoint string = storageModule.outputs.storageBlobEndpoint

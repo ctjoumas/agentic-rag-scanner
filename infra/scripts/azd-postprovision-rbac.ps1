@@ -44,7 +44,7 @@ if ($env:FOUNDRYNAME) {
             if ($LASTEXITCODE -ne 0) {
                 $msg = ($createResult | Out-String)
                 if ($msg -match 'RoleAssignmentExists') {
-                    Write-Host "  [OK] '$role' already assigned on $($env:FOUNDRYNAME)" -ForegroundColor DarkGray
+                    Write-Host "  [WARN] '$role' already assigned on $($env:FOUNDRYNAME)" -ForegroundColor Yellow
                 }
                 else {
                     Write-Error "Failed to assign '$role' to Foundry resource MI. $msg"
@@ -116,15 +116,36 @@ if ($deployAgentOnProvision -eq 'true') {
         exit 1
     }
 
-    & dotnet run --project $bingCliProjectPath -- upsert `
+    $bingConnectionName = $env:FOUNDRY_BING_CONNECTION_NAME
+    if (-not $bingConnectionName -or $bingConnectionName -eq 'bing-custom-search') {
+        $bingConnectionName = $env:BINGCUSTOMSEARCHACCOUNTNAME
+        azd env set FOUNDRY_BING_CONNECTION_NAME $bingConnectionName | Out-Null
+    }
+
+    $upsertOutput = & dotnet run --project $bingCliProjectPath -- upsert `
         --subscription $env:AZURE_SUBSCRIPTION_ID `
         --resource-group $env:AZURE_RESOURCE_GROUP `
         --bing-account-name $env:BINGCUSTOMSEARCHACCOUNTNAME `
         --bing-configuration-path $bingConfigurationPath `
-        --output-format json
+        --output-format json 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Error "BingCustomSearchCli failed during postprovision (exit code $LASTEXITCODE)."
         exit $LASTEXITCODE
+    }
+
+    $bingInstanceName = $null
+    $upsertJsonLine = $upsertOutput | Where-Object { $_ -like 'BING_CUSTOM_SEARCH_RESULT:*' } | Select-Object -Last 1
+    if ($upsertJsonLine) {
+        try {
+            $upsertJson = ($upsertJsonLine -replace '^BING_CUSTOM_SEARCH_RESULT:\s*', '') | ConvertFrom-Json
+            if ($upsertJson.configurationName) {
+                $bingInstanceName = [string]$upsertJson.configurationName
+                azd env set FOUNDRY_BING_INSTANCE_NAME $bingInstanceName | Out-Null
+            }
+        }
+        catch {
+            Write-Host "[WARN] Could not parse Bing upsert JSON output. Falling back to configured instance name." -ForegroundColor Yellow
+        }
     }
 
     Write-Host "`n--- Creating Foundry project connection for Bing Custom Search ---" -ForegroundColor Cyan
@@ -145,7 +166,7 @@ if ($deployAgentOnProvision -eq 'true') {
         --bing-account-name $env:BINGCUSTOMSEARCHACCOUNTNAME `
         --foundry-account-name $env:FOUNDRYNAME `
         --foundry-project-name $env:FOUNDRYPROJECTNAME `
-        --connection-name "bing-custom-search" `
+        --connection-name $bingConnectionName `
         --connection-display-name "Bing Custom Search" `
         --output-format json
     if ($LASTEXITCODE -ne 0) {
@@ -169,7 +190,16 @@ if ($deployAgentOnProvision -eq 'true') {
         exit 1
     }
 
-    $bingInstanceName = $env:FOUNDRY_BING_INSTANCE_NAME
+    # Surface the provisioned Foundry model deployment name for app/runtime configuration.
+    $foundryModel = $env:FOUNDRY_MODEL
+    if (-not $foundryModel -and $env:FOUNDRYDEPLOYEDMODELDEPLOYMENTNAME) {
+        $foundryModel = $env:FOUNDRYDEPLOYEDMODELDEPLOYMENTNAME
+        azd env set FOUNDRY_MODEL $foundryModel | Out-Null
+    }
+
+    if (-not $bingInstanceName) {
+        $bingInstanceName = $env:FOUNDRY_BING_INSTANCE_NAME
+    }
     if (-not $bingInstanceName) {
         Write-Error "Cannot deploy agent: set FOUNDRY_BING_INSTANCE_NAME (for example: Jurisdictions)."
         exit 1
@@ -183,6 +213,10 @@ if ($deployAgentOnProvision -eq 'true') {
         '--output-format', 'json'
     )
 
+    if ($foundryModel) {
+        $deployArgs += @('--model', $foundryModel)
+    }
+
     if ($env:FOUNDRY_BING_CONNECTION_ID) {
         $deployArgs += @('--bing-custom-search-connection-id', $env:FOUNDRY_BING_CONNECTION_ID)
     }
@@ -191,8 +225,8 @@ if ($deployAgentOnProvision -eq 'true') {
     }
     elseif ($env:BINGCUSTOMSEARCHACCOUNTNAME) {
         # Default to the connection created just above in this script.
-        $deployArgs += @('--bing-custom-search-connection-name', 'bing-custom-search')
-        azd env set FOUNDRY_BING_CONNECTION_NAME 'bing-custom-search' | Out-Null
+        $deployArgs += @('--bing-custom-search-connection-name', $bingConnectionName)
+        azd env set FOUNDRY_BING_CONNECTION_NAME $bingConnectionName | Out-Null
     }
     else {
         Write-Error "Cannot deploy agent: set FOUNDRY_BING_CONNECTION_NAME (recommended) or FOUNDRY_BING_CONNECTION_ID."
@@ -206,4 +240,4 @@ if ($deployAgentOnProvision -eq 'true') {
     }
 }
 
-Write-Host "`n=== RBAC setup complete ===" -ForegroundColor Green
+Write-Host "`n=== azd postprovision complete ===" -ForegroundColor Green
