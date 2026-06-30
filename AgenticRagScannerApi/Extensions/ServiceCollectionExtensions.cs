@@ -30,6 +30,7 @@ using Polly;
 using Polly.Retry;
 using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
 using System.ClientModel;
+using System.ClientModel.Primitives;
 
 namespace AgenticRagScannerApi.Extensions;
 
@@ -205,9 +206,19 @@ public static class ServiceCollectionExtensions
         {
             var options = sp.GetRequiredService<IOptions<WebSearchOptions>>().Value;
 
+            // Raise the SDK network timeout above the default 100s (Bing-grounded agent runs can exceed
+            // it) and disable the SDK's built-in retry so it does not compound with the Polly pipeline
+            // below - the resilience pipeline owns retries.
+            var projectOptions = new AIProjectClientOptions
+            {
+                NetworkTimeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds),
+                RetryPolicy = new ClientRetryPolicy(maxRetries: 0),
+            };
+
             var projectClient = new AIProjectClient(
                 new Uri(options.ProjectEndpoint),
-                sp.GetRequiredService<TokenCredential>());
+                sp.GetRequiredService<TokenCredential>(),
+                projectOptions);
 
             AIAgent agent;
             if (string.IsNullOrWhiteSpace(options.AgentVersion))
@@ -233,7 +244,7 @@ public static class ServiceCollectionExtensions
                     Delay = TimeSpan.FromSeconds(options.RetryBaseDelaySeconds),
                     ShouldHandle = static args => ValueTask.FromResult(IsTransientWebSearchFailure(args.Outcome.Exception)),
                 })
-                .AddTimeout(TimeSpan.FromSeconds(options.RequestTimeoutSeconds))
+                .AddTimeout(TimeSpan.FromSeconds(options.RequestTimeoutSeconds + 30))
                 .Build();
 
             return new WebSearchAgent(

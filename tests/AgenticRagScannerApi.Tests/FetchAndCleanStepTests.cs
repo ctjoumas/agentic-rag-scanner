@@ -10,14 +10,14 @@ using Microsoft.Extensions.Options;
 namespace AgenticRagScannerApi.Tests;
 
 /// <summary>
-/// Locks in the real Fetch &amp; clean step (Epic 5, story 5.2): HTML/PDF cleaning, the snippet fallback
+/// Locks in the real Fetch &amp; clean step (Epic 5, story 5.2): HTML/PDF cleaning, the unverified fallback
 /// (never drop, flag <see cref="FetchedDocument.Unverified"/>), and the size/content-type/scheme caps.
 /// All HTTP is served by an in-memory handler - no network.
 /// </summary>
 public class FetchAndCleanStepTests
 {
-    private static SearchHit Hit(string url, string? snippet = "Bing snippet text.") =>
-        new() { Url = url, SourceQuery = "q", Snippet = snippet };
+    private static SearchHit Hit(string url) =>
+        new() { Url = url, SourceQuery = "q" };
 
     private static FetchAndCleanStep NewStep(HttpResponseFactory factory, FetchOptions? options = null) =>
         new(
@@ -47,29 +47,29 @@ public class FetchAndCleanStepTests
     [InlineData("ftp://gov.uk/file")]
     [InlineData("mailto:a@gov.uk")]
     [InlineData("not a url")]
-    public async Task Fetch_NonHttpUrl_FallsBackToSnippet(string url)
+    public async Task Fetch_NonHttpUrl_FallsBackUnverified(string url)
     {
         var step = NewStep(_ => throw new InvalidOperationException("must not be called"));
 
         var doc = await step.FetchAsync(Hit(url));
 
         doc.Unverified.Should().BeTrue();
-        doc.CleanedText.Should().Be("Bing snippet text.");
+        doc.CleanedText.Should().BeNull();
     }
 
     [Fact]
-    public async Task Fetch_NonSuccessStatus_FallsBackToSnippet()
+    public async Task Fetch_NonSuccessStatus_FallsBackUnverified()
     {
         var step = NewStep(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
 
         var doc = await step.FetchAsync(Hit("https://www.gov.uk/missing"));
 
         doc.Unverified.Should().BeTrue();
-        doc.CleanedText.Should().Be("Bing snippet text.");
+        doc.CleanedText.Should().BeNull();
     }
 
     [Fact]
-    public async Task Fetch_DisallowedContentType_FallsBackToSnippet()
+    public async Task Fetch_DisallowedContentType_FallsBackUnverified()
     {
         var step = NewStep(_ =>
         {
@@ -83,11 +83,11 @@ public class FetchAndCleanStepTests
         var doc = await step.FetchAsync(Hit("https://www.gov.uk/data.json"));
 
         doc.Unverified.Should().BeTrue();
-        doc.CleanedText.Should().Be("Bing snippet text.");
+        doc.CleanedText.Should().BeNull();
     }
 
     [Fact]
-    public async Task Fetch_BodyOverSizeCap_FallsBackToSnippet()
+    public async Task Fetch_BodyOverSizeCap_FallsBackUnverified()
     {
         var big = new string('a', 2 * 1024 * 1024); // 2 MB of body
         var html = $"<html><body><main>{big}</main></body></html>";
@@ -96,37 +96,37 @@ public class FetchAndCleanStepTests
         var doc = await step.FetchAsync(Hit("https://www.gov.uk/huge"));
 
         doc.Unverified.Should().BeTrue();
-        doc.CleanedText.Should().Be("Bing snippet text.");
+        doc.CleanedText.Should().BeNull();
     }
 
     [Fact]
-    public async Task Fetch_TransportError_FallsBackToSnippet()
+    public async Task Fetch_TransportError_FallsBackUnverified()
     {
         var step = NewStep(_ => throw new HttpRequestException("connection reset"));
 
         var doc = await step.FetchAsync(Hit("https://www.gov.uk/flaky"));
 
         doc.Unverified.Should().BeTrue();
-        doc.CleanedText.Should().Be("Bing snippet text.");
+        doc.CleanedText.Should().BeNull();
     }
 
     [Fact]
-    public async Task Fetch_EmptyCleanedText_FallsBackToSnippet()
+    public async Task Fetch_EmptyCleanedText_FallsBackUnverified()
     {
         var step = NewStep(_ => Html("<html><body><nav>only boilerplate</nav></body></html>"));
 
         var doc = await step.FetchAsync(Hit("https://www.gov.uk/empty"));
 
         doc.Unverified.Should().BeTrue();
-        doc.CleanedText.Should().Be("Bing snippet text.");
+        doc.CleanedText.Should().BeNull();
     }
 
     [Fact]
-    public async Task Fetch_FailureWithNoSnippet_ReturnsNullCleanedTextButNeverDrops()
+    public async Task Fetch_ServerError_ReturnsNullCleanedTextButNeverDrops()
     {
         var step = NewStep(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
 
-        var doc = await step.FetchAsync(Hit("https://www.gov.uk/x", snippet: null));
+        var doc = await step.FetchAsync(Hit("https://www.gov.uk/x"));
 
         doc.Should().NotBeNull();
         doc.Unverified.Should().BeTrue();

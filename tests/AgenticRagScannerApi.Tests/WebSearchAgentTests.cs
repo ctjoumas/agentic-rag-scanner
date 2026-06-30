@@ -43,10 +43,10 @@ public class WebSearchAgentTests
             ResiliencePipeline.Empty,
             NullLogger<WebSearchAgent>.Instance);
 
-    private static AIContent Citation(string url, string? title = null, string? snippet = null) =>
+    private static AIContent Citation(string url, string? title = null) =>
         new TextContent(string.Empty)
         {
-            Annotations = [new CitationAnnotation { Url = new Uri(url, UriKind.RelativeOrAbsolute), Title = title, Snippet = snippet }],
+            Annotations = [new CitationAnnotation { Url = new Uri(url, UriKind.RelativeOrAbsolute), Title = title }],
         };
 
     private static IChatClient ChatClientReturning(params AIContent[] contents) =>
@@ -56,8 +56,8 @@ public class WebSearchAgentTests
     public async Task SearchAsync_MapsUrlCitationsToHits()
     {
         var chatClient = ChatClientReturning(
-            Citation("https://www.gov.uk/a", "Title A", "Snippet A"),
-            Citation("https://legislation.gov.uk/b", "Title B", "Snippet B"));
+            Citation("https://www.gov.uk/a", "Title A"),
+            Citation("https://legislation.gov.uk/b", "Title B"));
 
         var hits = await NewSut(chatClient).SearchAsync("query", NewRun());
 
@@ -65,7 +65,6 @@ public class WebSearchAgentTests
         hits[0].Url.Should().Be("https://www.gov.uk/a");
         hits[0].Domain.Should().Be("www.gov.uk");
         hits[0].Title.Should().Be("Title A");
-        hits[0].Snippet.Should().Be("Snippet A");
         hits[0].SourceQuery.Should().Be("query");
         hits[0].Rank.Should().Be(1);
         hits[1].Rank.Should().Be(2);
@@ -139,7 +138,7 @@ public class WebSearchAgentTests
             failures: 1,
             success: new ChatResponse(new ChatMessage(
                 ChatRole.Assistant,
-                [Citation("https://www.gov.uk/a", "Title A", "Snippet A")])));
+                [Citation("https://www.gov.uk/a", "Title A")])));
 
         var retryOnce = new ResiliencePipelineBuilder()
             .AddRetry(new RetryStrategyOptions

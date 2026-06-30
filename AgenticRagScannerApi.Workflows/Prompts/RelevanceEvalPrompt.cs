@@ -118,7 +118,7 @@ public static class RelevanceEvalPrompt
 
             if (doc.Unverified)
             {
-                builder.AppendLine("NOTE: full-text fetch failed; only the search snippet is available (treat as unverified).");
+                builder.AppendLine("NOTE: full-text fetch failed; no content is available (treat as unverified).");
             }
 
             builder.AppendLine("Full text:");

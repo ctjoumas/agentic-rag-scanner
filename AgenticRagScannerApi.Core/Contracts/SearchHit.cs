@@ -12,9 +12,6 @@ public sealed class SearchHit
     /// <summary>Result title, if provided.</summary>
     public string? Title { get; init; }
 
-    /// <summary>Bing 2-3 sentence summary; the fallback source if full-text fetch fails.</summary>
-    public string? Snippet { get; init; }
-
     /// <summary>Host/domain (used for allowlist checks and level-of-authority hints).</summary>
     public string? Domain { get; init; }
 
