@@ -42,7 +42,11 @@ public sealed class WebSearchOptions
     [Range(0.0, 60.0)]
     public double RetryBaseDelaySeconds { get; set; } = 2.0;
 
-    /// <summary>Per-request timeout (seconds) the resilience pipeline enforces on each Web Search agent call.</summary>
+    /// <summary>
+    /// Per-request timeout (seconds). Drives both the SDK network timeout on the Foundry
+    /// <c>AIProjectClient</c> (raising it above the 100s default, since Bing-grounded agent runs can
+    /// exceed that) and the resilience pipeline's per-attempt backstop.
+    /// </summary>
     [Range(1, 600)]
-    public int RequestTimeoutSeconds { get; set; } = 100;
+    public int RequestTimeoutSeconds { get; set; } = 240;
 }
