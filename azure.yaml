@@ -11,6 +11,10 @@
 #   AZURE_BASE_NAME            Base name for resources (default: agentic-rag-scanner)
 #   AZURE_RBAC_PRINCIPAL_ID    Object ID of an additional managed identity / SP
 #                              to grant roles to (besides the signed-in user).
+#   DEPLOY_BING_AGENT_ON_PROVISION  Set to false to skip automatic agent deployment in postprovision.
+#   FOUNDRY_BING_CONNECTION_NAME    Foundry connection name for Grounding with Bing Custom Search.
+#   FOUNDRY_BING_CONNECTION_ID      Optional explicit Foundry connection id (alternative to name).
+#   FOUNDRY_BING_INSTANCE_NAME      Bing Custom Search configuration name (for example: Jurisdictions).
 name: agentic-rag-scanner
 metadata:
   template: agentic-rag-scanner@1.0.0

@@ -1,6 +1,36 @@
 @description('Azure region for all resources.')
 param location string = resourceGroup().location
 
+@description('Azure region for Foundry Agent Service resources.')
+@allowed([
+  'australiaeast'
+  'brazilsouth'
+  'canadacentral'
+  'canadaeast'
+  'eastus'
+  'eastus2'
+  'francecentral'
+  'germanywestcentral'
+  'italynorth'
+  'japaneast'
+  'koreacentral'
+  'northcentralus'
+  'norwayeast'
+  'polandcentral'
+  'southafricanorth'
+  'southcentralus'
+  'southeastasia'
+  'southindia'
+  'spaincentral'
+  'swedencentral'
+  'switzerlandnorth'
+  'uaenorth'
+  'uksouth'
+  'westus'
+  'westus3'
+])
+param foundryLocation string = location
+
 @description('Base name used to derive resource names.')
 param baseName string = 'agenticragscanner'
 
@@ -19,12 +49,16 @@ param deployFoundryProject bool = false
 @description('Foundry project name when deployFoundryProject is true.')
 param foundryProjectName string = ''
 
+@description('Create the Bing Custom Search resource used by the Foundry grounding agent.')
+param deployBingCustomSearch bool = false
+
 var suffix = toLower(substring(uniqueString(subscription().id, resourceGroup().id), 0, 6))
 var compactBaseName = toLower(replace(baseName, '-', ''))
 
 var storageAccountName = take('${compactBaseName}${suffix}st', 24)
 var cosmosAccountName = take('${compactBaseName}-${suffix}-cosmos', 44)
 var foundryAccountName = take('${compactBaseName}-${suffix}-foundry', 64)
+var bingCustomSearchAccountName = take('${compactBaseName}-${suffix}-bing', 64)
 var keyVaultName = take('${compactBaseName}-${suffix}-kv', 24)
 var appConfigStoreName = take('${compactBaseName}-${suffix}-appcs', 50)
 var appInsightsName = '${baseName}-${suffix}-appi'
@@ -53,10 +87,18 @@ module storageModule './modules/storage.bicep' = {
 module foundryModule './modules/foundry.bicep' = {
   name: 'foundryDeployment'
   params: {
-    location: location
+    location: foundryLocation
     accountName: foundryAccountName
     deployProject: deployFoundryProject
     projectName: foundryProjectName
+    tags: tags
+  }
+}
+
+module bingSearchModule './modules/bingsearch.bicep' = if (deployBingCustomSearch) {
+  name: 'bingSearchDeployment'
+  params: {
+    accountName: bingCustomSearchAccountName
     tags: tags
   }
 }
@@ -93,6 +135,8 @@ module appInsightsModule './modules/appinsights.bicep' = {
 output cosmosAccountName string = cosmosModule.outputs.cosmosAccountName
 output storageAccountName string = storageModule.outputs.storageAccountName
 output foundryName string = foundryModule.outputs.foundryName
+output bingCustomSearchAccountName string = deployBingCustomSearch ? bingSearchModule.outputs.bingCustomSearchAccountName : ''
+output bingCustomSearchResourceId string = deployBingCustomSearch ? bingSearchModule.outputs.bingCustomSearchResourceId : ''
 output keyVaultName string = keyVaultModule.outputs.keyVaultName
 output appInsightsName string = appInsightsModule.outputs.appInsightsName
 output appConfigStoreName string = appConfigModule.outputs.appConfigStoreName

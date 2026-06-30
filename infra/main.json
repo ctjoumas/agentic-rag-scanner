@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.44.1.10279",
-      "templateHash": "17014375878687381047"
+      "templateHash": "7620465290760158428"
     }
   },
   "parameters": {
@@ -14,6 +14,40 @@
       "defaultValue": "[resourceGroup().location]",
       "metadata": {
         "description": "Azure region for all resources."
+      }
+    },
+    "foundryLocation": {
+      "type": "string",
+      "defaultValue": "[parameters('location')]",
+      "allowedValues": [
+        "australiaeast",
+        "brazilsouth",
+        "canadacentral",
+        "canadaeast",
+        "eastus",
+        "eastus2",
+        "francecentral",
+        "germanywestcentral",
+        "italynorth",
+        "japaneast",
+        "koreacentral",
+        "northcentralus",
+        "norwayeast",
+        "polandcentral",
+        "southafricanorth",
+        "southcentralus",
+        "southeastasia",
+        "southindia",
+        "spaincentral",
+        "swedencentral",
+        "switzerlandnorth",
+        "uaenorth",
+        "uksouth",
+        "westus",
+        "westus3"
+      ],
+      "metadata": {
+        "description": "Azure region for Foundry Agent Service resources."
       }
     },
     "baseName": {
@@ -57,6 +91,13 @@
       "metadata": {
         "description": "Foundry project name when deployFoundryProject is true."
       }
+    },
+    "deployBingCustomSearch": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Create the Bing Custom Search resource used by the Foundry grounding agent."
+      }
     }
   },
   "variables": {
@@ -65,6 +106,7 @@
     "storageAccountName": "[take(format('{0}{1}st', variables('compactBaseName'), variables('suffix')), 24)]",
     "cosmosAccountName": "[take(format('{0}-{1}-cosmos', variables('compactBaseName'), variables('suffix')), 44)]",
     "foundryAccountName": "[take(format('{0}-{1}-foundry', variables('compactBaseName'), variables('suffix')), 64)]",
+    "bingCustomSearchAccountName": "[take(format('{0}-{1}-bing', variables('compactBaseName'), variables('suffix')), 64)]",
     "keyVaultName": "[take(format('{0}-{1}-kv', variables('compactBaseName'), variables('suffix')), 24)]",
     "appConfigStoreName": "[take(format('{0}-{1}-appcs', variables('compactBaseName'), variables('suffix')), 50)]",
     "appInsightsName": "[format('{0}-{1}-appi', parameters('baseName'), variables('suffix'))]",
@@ -356,7 +398,7 @@
         "mode": "Incremental",
         "parameters": {
           "location": {
-            "value": "[parameters('location')]"
+            "value": "[parameters('foundryLocation')]"
           },
           "accountName": {
             "value": "[variables('foundryAccountName')]"
@@ -378,14 +420,14 @@
             "_generator": {
               "name": "bicep",
               "version": "0.44.1.10279",
-              "templateHash": "7366431172488510418"
+              "templateHash": "9618556127705865482"
             }
           },
           "parameters": {
             "location": {
               "type": "string",
               "metadata": {
-                "description": "Azure region for Microsoft Foundry account."
+                "description": "Azure region for Azure AI Foundry account."
               }
             },
             "accountName": {
@@ -468,6 +510,82 @@
             "foundryProjectPrincipalId": {
               "type": "string",
               "value": "[if(parameters('deployProject'), reference(resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('accountName'), parameters('projectName')), '2025-06-01', 'full').identity.principalId, '')]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "condition": "[parameters('deployBingCustomSearch')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "bingSearchDeployment",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "accountName": {
+            "value": "[variables('bingCustomSearchAccountName')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.44.1.10279",
+              "templateHash": "10058813864298172306"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "defaultValue": "global",
+              "metadata": {
+                "description": "Azure region for the Bing Custom Search resource."
+              }
+            },
+            "accountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Bing Custom Search account name."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tags applied to the Bing Custom Search resource."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Bing/accounts",
+              "apiVersion": "2020-06-10",
+              "name": "[parameters('accountName')]",
+              "location": "[parameters('location')]",
+              "kind": "Bing.GroundingCustomSearch",
+              "sku": {
+                "name": "G2"
+              },
+              "tags": "[parameters('tags')]"
+            }
+          ],
+          "outputs": {
+            "bingCustomSearchAccountName": {
+              "type": "string",
+              "value": "[parameters('accountName')]"
+            },
+            "bingCustomSearchResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Bing/accounts', parameters('accountName'))]"
             }
           }
         }
@@ -768,6 +886,14 @@
     "foundryName": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundryDeployment'), '2025-04-01').outputs.foundryName.value]"
+    },
+    "bingCustomSearchAccountName": {
+      "type": "string",
+      "value": "[if(parameters('deployBingCustomSearch'), reference(resourceId('Microsoft.Resources/deployments', 'bingSearchDeployment'), '2025-04-01').outputs.bingCustomSearchAccountName.value, '')]"
+    },
+    "bingCustomSearchResourceId": {
+      "type": "string",
+      "value": "[if(parameters('deployBingCustomSearch'), reference(resourceId('Microsoft.Resources/deployments', 'bingSearchDeployment'), '2025-04-01').outputs.bingCustomSearchResourceId.value, '')]"
     },
     "keyVaultName": {
       "type": "string",

@@ -92,5 +92,63 @@ if [ -n "${AZURE_RBAC_PRINCIPAL_ID:-}" ]; then
     run_setup --principal-id "$AZURE_RBAC_PRINCIPAL_ID" --principal-name "$NAME"
 fi
 
+# 5. Deploy/update the Bing-grounded Foundry agent during provisioning.
+DEPLOY_BING_AGENT_ON_PROVISION_LOWER="$(printf '%s' "${DEPLOY_BING_AGENT_ON_PROVISION:-true}" | tr '[:upper:]' '[:lower:]')"
+if [ "$DEPLOY_BING_AGENT_ON_PROVISION_LOWER" = "true" ]; then
+    echo ""
+    echo "--- Upserting Bing Custom Search configuration ---"
+
+    BING_CLI_PROJECT="$SCRIPT_DIR/../tools/AgenticRagScanner.BingCustomSearchCli/AgenticRagScanner.BingCustomSearchCli.csproj"
+    BING_CONFIGURATION_PATH="$SCRIPT_DIR/../tools/AgenticRagScanner.BingCustomSearchCli/Configuration/bing-custom-search.yaml"
+
+    if [ -z "${BINGCUSTOMSEARCHACCOUNTNAME:-}" ]; then
+        echo "ERROR: Cannot configure Bing Custom Search: BINGCUSTOMSEARCHACCOUNTNAME is not set." >&2
+        exit 1
+    fi
+
+    dotnet run --project "$BING_CLI_PROJECT" -- upsert \
+        --subscription "$AZURE_SUBSCRIPTION_ID" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --bing-account-name "$BINGCUSTOMSEARCHACCOUNTNAME" \
+        --bing-configuration-path "$BING_CONFIGURATION_PATH" \
+        --output-format json
+    
+    echo ""
+    echo "--- Deploying Bing-grounded Foundry agent ---"
+
+    DEPLOY_CLI_PROJECT="$SCRIPT_DIR/../tools/AgenticRagScanner.DeployAgentCli/AgenticRagScanner.DeployAgentCli.csproj"
+    AGENT_YAML_PATH="$SCRIPT_DIR/../tools/AgenticRagScanner.DeployAgentCli/Configuration/bing-grounding-agent.yaml"
+
+    PROJECT_ENDPOINT="${FOUNDRY_PROJECT_ENDPOINT:-}"
+    if [ -z "$PROJECT_ENDPOINT" ] && [ -n "${FOUNDRYNAME:-}" ] && [ -n "${FOUNDRYPROJECTNAME:-}" ]; then
+        PROJECT_ENDPOINT="https://${FOUNDRYNAME}.services.ai.azure.com/api/projects/${FOUNDRYPROJECTNAME}"
+        azd env set FOUNDRY_PROJECT_ENDPOINT "$PROJECT_ENDPOINT" >/dev/null
+    fi
+
+    if [ -z "$PROJECT_ENDPOINT" ]; then
+        echo "ERROR: Cannot deploy agent: FOUNDRY_PROJECT_ENDPOINT is not set and could not be derived." >&2
+        exit 1
+    fi
+
+    if [ -z "${FOUNDRY_BING_INSTANCE_NAME:-}" ]; then
+        echo "ERROR: Cannot deploy agent: set FOUNDRY_BING_INSTANCE_NAME (for example: Jurisdictions)." >&2
+        exit 1
+    fi
+
+    DEPLOY_ARGS="deploy --endpoint \"$PROJECT_ENDPOINT\" --yaml-path \"$AGENT_YAML_PATH\" --bing-custom-search-instance-name \"$FOUNDRY_BING_INSTANCE_NAME\" --output-format json"
+
+    if [ -n "${FOUNDRY_BING_CONNECTION_ID:-}" ]; then
+        DEPLOY_ARGS="$DEPLOY_ARGS --bing-custom-search-connection-id \"$FOUNDRY_BING_CONNECTION_ID\""
+    elif [ -n "${FOUNDRY_BING_CONNECTION_NAME:-}" ]; then
+        DEPLOY_ARGS="$DEPLOY_ARGS --bing-custom-search-connection-name \"$FOUNDRY_BING_CONNECTION_NAME\""
+    else
+        echo "ERROR: Cannot deploy agent: set FOUNDRY_BING_CONNECTION_NAME (recommended) or FOUNDRY_BING_CONNECTION_ID." >&2
+        exit 1
+    fi
+
+    # shellcheck disable=SC2086
+    eval dotnet run --project "$DEPLOY_CLI_PROJECT" -- $DEPLOY_ARGS
+fi
+
 echo ""
 echo "=== RBAC setup complete ==="
