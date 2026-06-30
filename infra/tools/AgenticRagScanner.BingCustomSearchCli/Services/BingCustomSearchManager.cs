@@ -183,6 +183,7 @@ internal sealed class BingCustomSearchManager
 
         // Resolve API keys from the provisioned Bing Grounding account.
         string bingKey = await GetBingApiKeyAsync(token, subscriptionId, resourceGroup, bingAccountName, cancellationToken);
+        string bingResourceId = $"/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.Bing/accounts/{bingAccountName}";
 
         // Grounding with custom search connection for Foundry project.
         object payload = new
@@ -191,15 +192,17 @@ internal sealed class BingCustomSearchManager
             {
                 authType = "ApiKey",
                 category = "GroundingWithCustomSearch",
-                target = "https://api.bing.microsoft.com",
+                target = "https://api.bing.microsoft.com/",
                 credentials = new
                 {
                     key = bingKey,
                 },
                 metadata = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["Location"] = "global",
-                    ["DisplayName"] = connectionDisplayName,
+                    ["ApiType"] = "Azure",
+                    ["ResourceId"] = bingResourceId,
+                    ["type"] = "bing_custom_search_preview",
+                    ["displayName"] = bingAccountName,
                 },
             },
         };
