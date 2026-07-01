@@ -176,7 +176,7 @@ compile and are referenced by the API.
 ---
 
 ### Phase 1 — Run lifecycle: synchronous scan · *L1-led*
-**Goal:** accept the request, iterate the selected topic groups **sequentially** (one at a time), and **return the aggregated results in the HTTP response**. Synchronous for the POC — no run-status/background machinery. *(Parallel fan-out is deferred to Phase 12; the async path is captured in Phase 13.)*
+**Goal:** accept the request, iterate the selected topic groups **sequentially** (one at a time), and **return the aggregated results in the HTTP response**. Synchronous for the POC — no run-status/background machinery. *(Parallel fan-out is deferred to Phase 13; the async path is captured in Phase 14.)*
 `-> arch steps 1–2`
 
 **Tasks**
@@ -184,7 +184,7 @@ compile and are referenced by the API.
   per group (each seeded with an empty `SearchHistory`), then run them **one at a time**.
 - [ ] **(L1)** Per-group **placeholder** step (returns a stub result) so **sequential per-group** progress is observable; Phase 2 swaps it for the real MAF workflow.
 - [ ] **(L1)** Wire `ScannerController.Scan` to run the scan **synchronously** and return `200` with the aggregated results (replace TODO).
-- [ ] **(L1)** Wire the shared throttle for outbound LLM/Bing rate-limiting (concurrency capping deferred to Phase 12).
+- [ ] **(L1)** Wire the shared throttle for outbound LLM/Bing rate-limiting (concurrency capping deferred to Phase 13).
 - [ ] **(L3)** Structured logging scopes (`runId`, `topicGroupId`) around the sequential per-group loop.
 
 **DoD / demo:** `POST scan` with 3 topic groups -> `200` with aggregated stub results; the 3 groups complete one-by-one. No status endpoint, no MAF yet.
@@ -234,7 +234,7 @@ this split right keeps cost down and makes each unit independently testable.
 
 **Tasks — workflow & orchestration (L1)**
 - [ ] Add `AgenticRagScanner.Workflows`; define **one MAF workflow per topic group**, with MAF
-  **Cosmos checkpointing** wired to the shared Azure Cosmos account (see Phase 8) so long runs are durable/resumable.
+  **Cosmos checkpointing** wired to the shared Azure Cosmos account (see Phase 9) so long runs are durable/resumable.
 - [ ] Build the loop scaffold threading `SearchHistory` through each pass:
   `QuerySynthesis (MAF agent) ? WebSearch (Foundry agent, Grounding with Bing Custom Search) ? Pre-filter ? Fetch&Clean ?`
   `RelevanceEval ? LoopController ? VerdictRouting ? Enrichment ? Categorize ? Summarize&Impact`.
@@ -280,7 +280,7 @@ routes verdicts, emits stub `ResultItem`s, and **checkpoints to Cosmos**. No ext
   (primer §2/§3). It returns queries only — the Web Search Foundry agent (Phase 4) runs Bing.
   *(`QuerySynthesisAgent` over a MAF `ChatClientAgent`.)*
 - [x] **(L2)** Structured output + validation; bounded retry on invalid JSON. *(JSON response format, tolerant parse + dedupe/cap, bounded retry, deterministic fallback.)*
-- [x] **(L3)** Token-usage + latency metrics for the agent. *(Per-call token/latency logged in `ResilientChatClient`; OpenTelemetry GenAI instrumentation wired for export in Phase 11.)*
+- [x] **(L3)** Token-usage + latency metrics for the agent. *(Per-call token/latency logged in `ResilientChatClient`; OpenTelemetry GenAI instrumentation wired for export in Phase 12.)*
 
 **DoD / demo:** real, non-redundant **queries** generated from a topic group's keywords; second loop
 targets untested synonyms/gaps. (Grounded hits arrive once the Web Search Foundry agent is real in Phase 4.)
@@ -324,8 +324,8 @@ its Bing Custom Search tool; duplicates (including across groups) removed; dead 
 - [ ] **(L3)** **Fetch hygiene (not a full SSRF guard):** http/https-only scheme + caps on response
   size, redirects, content-types, and per-fetch timeout. The full SSRF guard (host allowlist +
   private/loopback IP blocking) is **deferred** — fetch targets are the customer's curated
-  primary-source (government) domains, already gated by Bing Custom Search. Tracked as an Epic 11
-  nice-to-have (backlog 11.6).
+  primary-source (government) domains, already gated by Bing Custom Search. Tracked as an Epic 12
+  nice-to-have (backlog 12.6).
 - [ ] **(L3)** **Persist cleaned full text to blob (mandatory, audit).** Every fetched result URL's
   cleaned full text is stored to blob (the live URL can change or 404, so snapshot exactly what eval
   read). Store a **blob reference (path/URI)**, on `ResultItem.FullTextBlobUri`; keep the
@@ -336,7 +336,7 @@ its Bing Custom Search tool; duplicates (including across groups) removed; dead 
 > immutable snapshot of what the agent read. It is stored in **blob, referenced** from the `ResultItem`,
 > **not inline** in Cosmos: Cosmos has a **2 MB item cap** (large HTML/PDF would hard-fail) and charges RU
 > proportional to body size on every read/list. The structured decision (`Verdict`, `EvalRationale`,
-> dates, `SourceUrls`, `FullTextBlobUri`) lives on the Cosmos `ResultItem` (Phase 8); the bytes live in
+> dates, `SourceUrls`, `FullTextBlobUri`) lives on the Cosmos `ResultItem` (Phase 9); the bytes live in
 > blob. The in-memory `SearchHistory`/`FetchedDocument` remain transient loop state.
 
 **DoD / demo:** cleaned full-text persisted to blob for every result URL and referenced on the
@@ -366,7 +366,7 @@ its Bing Custom Search tool; duplicates (including across groups) removed; dead 
   (see backlog 6.6).
 - [ ] **(L3)** Verdict-distribution metric; eval-harness recall check on golden set.
   *(**Outstanding** — no verdict-distribution metric or golden dataset / recall harness yet; folds into
-  the Phase 11 eval suite + dashboards.)*
+  the Phase 12 eval suite + dashboards.)*
 
 **Loop-feedback signal (design decision — build here, not before):** the eval agent must emit a
 **steer** for the next query-synthesis pass that distinguishes **two reasons to loop again**, because
@@ -398,7 +398,7 @@ query-synthesis prompt must carry matching **interpretation instructions**, and 
 together so a change on one side never silently desyncs the other.
 
 **Decision:** Phase 6 ships **Option (A)** — the lower-risk prose route, no Core contract change. **Option
-(B)** (the structured `SearchDirective` list) is deferred as a **later-phase nice-to-have** (see Phase 11
+(B)** (the structured `SearchDirective` list) is deferred as a **later-phase nice-to-have** (see Phase 12
 tuning), to be picked up only if eval prose proves unreliable in practice or once directive-type metrics
 are wanted. Do **not** add the `SearchDirective` Core field in Phase 5 or Phase 6 — there is no producer
 for it until (B) is actually scheduled.
@@ -408,21 +408,69 @@ flagged and carried; NOT_RELEVANT logged.
 
 ---
 
-### Phase 7 — Enrichment + Categorize + Summarize/Impact agents · *L2-led*
-**Goal:** finish the downstream agents. `? arch steps 12–14`
+### Phase 7 — Per-step MAF executor decomposition (mid-pass checkpointing) · *L1-led* · ✅ **Complete**
+**Goal:** decompose the topic-group loop body into per-step MAF executors so the run checkpoints
+**between steps** (resume mid-pass instead of replaying a whole pass) and Fetch & Clean / Relevance
+Eval can fan out per document. Delivered ahead of fan-out (Phase 13) because it shares the same
+decomposition. `? arch steps 4–11` *(Delivered on the `phase-7` branch / PR #36.)*
 
 **Tasks**
-- [ ] **(L2)** **Content Analysis / Enrichment** (real): `WhatItDoes` summary; enrich metadata.
-- [ ] **(L2)** **Categorize Agent** (Stage 2): impact area, regulator, **approved tags only**.
-- [ ] **(L2)** **Summarize & Impact Agent** (Stage 3): RAG over in-memory history; effective date;
-  **plain-English** impact.
+- [x] **(L1)** Decompose the loop body into **seven MAF executors** wired by edges in the frozen order
+  (**Query Synthesis → Web Search → Pre-filter → Fetch & Clean → Relevance Eval → Loop Controller →
+  Finalize**), with the branch **checked on the Loop Controller executor's response**: Relevance Eval
+  emits the raw `ReviewDecision`, the `LoopControllerExecutor` applies the cap + ≥80% override and
+  emits the existing `Review` whose `FinalDecision` is a `LoopDecision` (`Retry` → conditional
+  loop-back edge to Query Synthesis; `Finalize` → conditional exit edge to the `FinalizeExecutor`
+  tail), using MAF conditional edges (`AddEdge(loopController, target, condition: …)` on
+  `Review.FinalDecision`).
+- [x] **(L1)** Checkpoint **between steps** (resume mid-pass instead of replaying a whole pass);
+  per-pass `SearchHistory` checkpointing owned by the Loop Controller executor.
+- [x] **(L1)** Fetch & Clean fan-out/fan-in per document; per-step traces. Design + trade-offs in
+  **`docs/maf-executor-design.md`**; tracked as backlog **7.1**.
 
-**DoD / demo:** each carried item is enriched, categorized with approved tags, and has a
-plain-English impact summary.
+**DoD / demo:** each pipeline step is its own MAF executor; a mid-pass failure resumes after the last
+completed step; the loop-back/finalize branch is driven by the Loop Controller executor's response.
 
 ---
 
-### Phase 8 — Deterministic quality gates + Cosmos persistence · *L3-led*
+### Phase 8 — Enrichment + Categorize (Impact Area + Tags) + Summary + Deloitte View · *L2-led*
+**Goal:** finish the downstream agents that run on each carried **regulatory update** (what Bing surfaces for a topic group) **after** the Agentic RAG loop: optional enrichment, categorization split into **Impact Area** + **Tags** (separate LLM calls), a professional **Summary**, and a practitioner-style **Deloitte View**. `? arch steps 12–14`
+
+**Tasks**
+- [ ] **(L2)** **Enrichment Agent** (`WhatItDoes` summary + metadata) — **parked / optional.** The customer does not currently need this, so it stays **unscheduled but retained** in the plan; revisit if a "what it does" summary is later wanted. *(Do not delete — pending customer confirmation.)*
+- [ ] **(L2)** **Impact Area Agent:** assign **one impact area** to the regulatory update using the **topic group** + the **vetted full-text documents** from the end of the Agentic RAG loop, against the **approved impact-area vocabulary loaded from Cosmos** (RegDocs, `doc_type = "ImpactAreas"`). Single-label; the controlled vocabulary is a closed set — the agent must pick exactly one.
+- [ ] **(L2)** **Tags Agent** (separate agent / separate LLM call): assign **one or more tags** from the **approved tag vocabulary loaded from Cosmos** (RegDocs, `doc_type = "tags"`). Kept separate from Impact Area on purpose — one LLM task per prompt, independently tunable/evaluable, and tags are multi-label while impact area is single-label.
+- [ ] **(L2)** **Load both vocabularies from Cosmos at runtime** via `ICosmosRepository<T>` against the **RegDocs** container (partition key `/doc_type`). Docs are `{ id, doc_type, name }`; query by partition key `"ImpactAreas"` / `"tags"` and project `name`. Cosmos is the **single source of truth** — do **not** hardcode the lists into the prompts/agents. The vocabularies are seeded via `dotnet run -- seed` (`ImpactAreaSeeder` / `TagSeeder`, both merged to `main`); the RegDocs container is provisioned via IaC (`infra/modules/cosmos.bicep`).
+- [ ] **(L2)** **Summary Agent:** a **professional summarization** of the regulatory update found for the topic group.
+- [ ] **(L2)** **Deloitte View Agent** (separate agent): produce the **Deloitte View** — how a Deloitte practitioner would advise a client about the update — using **RAG over prior Deloitte Views** retrieved **by jurisdiction** (jurisdiction is **passed in on the scan request**). Prior views share a consistent house style/tone and steer the output. **Retrieval source:** local testing reads a **CSV** of historical Deloitte Views (customer spreadsheet); the production source is **SQL** (relational by jurisdiction, e.g. `WHERE jurisdiction = 'United Kingdom'`) — SQL wiring **deferred**, behind a retrieval abstraction.
+
+**Impact areas (approved vocabulary — single-label; runtime source: Cosmos RegDocs `doc_type = "ImpactAreas"`):**
+1. Administration of employment taxes withholding & payments
+2. Employer tax reporting/filing requirements
+3. Taxation of equity & incentives
+4. Taxation of fringe benefits and employee expenses
+5. International/expat tax arrangements
+6. Employment taxes authority enforcement procedures
+7. Employment taxes rates & thresholds
+8. Employment taxes impact of termination/severance pay & benefits
+9. Employment taxes updates related to state of emergency
+10. Taxation of contractors and contingent labour
+11. Governance and controls of employment taxes requirements
+
+**Tags (approved vocabulary — multi-label; runtime source: Cosmos RegDocs `doc_type = "tags"`):**
+Payroll Reporting · National Insurance · Social Security · International Tax Treaties · Remote Work · PE · Expat tax regime · s.690 · Overseas Workday Relief · Company Cars · EVs · Benefits In Kind · ECOS · Class 2 NIC · CIS · Construction · Tax Authority Enforcement · Employee Benefits · Exemptions · Eye Tests · IR35 · Off Payroll · End Client · Remote Working · Home Exemption · Tax Return Deduction · Pensions · Salary Sacrifice · Fuel Rates · Income Tax
+
+**Follow-ups / open items**
+- **Regulator field struck** from categorization — its meaning in this context is unclear; **follow up with the customer** before re-adding.
+- **Jurisdiction** must be added to the **scan-request contract** (Phase 0/1) since the Deloitte View retrieval keys on it.
+- Deloitte View retrieval abstraction: **CSV-backed** for local, **SQL-backed in production** (later task).
+- The enumerated impact-area / tag lists above are the **reference copy**; the **runtime source is Cosmos RegDocs** (seeded via `dotnet run -- seed`). Keep the two in sync if the customer revises the vocabulary — re-seed rather than editing prompts.
+
+**DoD / demo:** each carried regulatory update has an **impact area**, one or more **tags**, a professional **Summary**, and a **Deloitte View** grounded in prior jurisdiction-matched views (CSV locally); the Enrichment agent remains parked.
+
+---
+
+### Phase 9 — Deterministic quality gates + Cosmos persistence · *L3-led*
 **Goal:** validate, dedupe vs store, stamp authority, persist. `? arch steps 15–16`
 
 **Tasks**
@@ -440,7 +488,7 @@ authority level stamped.
 
 ---
 
-### Phase 9 — Publish & export · *L3-led*
+### Phase 10 — Publish & export · *L3-led*
 **Goal:** publish results and export. `? arch step 17`
 
 **Tasks**
@@ -451,7 +499,7 @@ authority level stamped.
 
 ---
 
-### Phase 10 — Memory / learnings store (Azure AI Search) · *L3 + L2* · *was FUTURE #8*
+### Phase 11 — Memory / learnings store (Azure AI Search) · *L3 + L2* · *was FUTURE #8*
 **Goal:** cross-run learnings feeding synthesis + eval. `? arch step 8 (planned)`
 
 **Tasks**
@@ -464,7 +512,7 @@ authority level stamped.
 
 ---
 
-### Phase 11 — Hardening: evals, throttle tuning, dashboards, security · *all lanes*
+### Phase 12 — Hardening: evals, throttle tuning, dashboards, security · *all lanes*
 **Goal:** make it production-credible.
 
 **Tasks**
@@ -482,7 +530,7 @@ authority level stamped.
 
 ---
 
-### Phase 12 — Fan-out & parallelization (MAF) · *L1-led*
+### Phase 13 — Fan-out & parallelization (MAF) · *L1-led*
 **Goal:** now that the whole pipeline runs reliably **end-to-end and sequentially**, introduce
 parallel per-topic-group execution under the shared throttle. Deferred here on purpose to de-risk
 threading and keep the early phases focused on the core RAG loop.
@@ -493,20 +541,21 @@ threading and keep the early phases focused on the core RAG loop.
 - [ ] **(L1)** Per-group cancellation still honored under parallel execution; partial results preserved.
 - [ ] **(L3)** Concurrency telemetry: in-flight concurrency gauge + throttle wait-time metric; parallel spans per run/group.
 - [ ] **(L1)** Load/throttle tuning under parallel load: stay within TPM/RPM/QPS with N groups in flight; backpressure verified; per-group cap documented.
-- [ ] **(L1)** `needs-design` Decompose the topic-group **loop body** into **seven MAF executors** wired by edges (**Query Synthesis → Web Search → Pre-filter → Fetch & Clean → Relevance Eval → Loop Controller → Finalize**), with the branch **checked on the Loop Controller executor's response**: Relevance Eval emits the raw `ReviewDecision`, the `LoopControllerExecutor` applies the cap + ≥80% override and emits the existing `Review` whose `FinalDecision` is a `LoopDecision` (`Retry` → conditional loop-back edge to Query Synthesis for another pass; `Finalize` → conditional exit edge to the `FinalizeExecutor` tail), using MAF conditional edges (`AddEdge(loopController, target, condition: …)` on `Review.FinalDecision`). Checkpoint **between steps** (resume mid-pass instead of replaying a whole pass); Fetch & Clean fan-out/fan-in per document; per-step traces. Design + trade-offs in **`docs/maf-executor-design.md`**; tracked as backlog **12.4**. *(Finalize chain stays a sequential tail — out of scope.)*
+
+> **Note:** the per-step executor decomposition this parallelization builds on **already landed in Phase 7** (backlog **7.1**) — the loop body is already seven MAF executors with between-step checkpointing.
 
 **DoD / demo:** the same pipeline that ran sequentially now runs topic groups **concurrently** under
 the throttle; throughput improves; the throttle caps active workers; parallel spans visible; cancellation still works.
 
 ---
 
-### Phase 13 — FUTURE / post-POC (not scheduled) · *backlog*
+### Phase 14 — FUTURE / post-POC (not scheduled) · *backlog*
 `? arch steps 18–20 + primer §5 deferrals`
 - [ ] Azure **Function** timer host (scheduled scans) alongside the Web API.
 - [ ] **Bicep** infra-as-code for all resources + Managed Identity role assignments.
 - [ ] **Admin UI** — review of past runs.
 - [ ] **Structured review capture** (verdict correction + reason codes + notes).
-- [ ] **Distillation job** rolling reviews into curated guidance ? memory store (Phase 10).
+- [ ] **Distillation job** rolling reviews into curated guidance ? memory store (Phase 11).
 - [ ] **Async execution mode** — background run + run-status store + `GET /runs/{runId}` polling + cancellation (merged out of the old Phase 2). Only needed if synchronous scans outgrow gateway timeouts (~230s on App Service) or a live-progress UI is wanted.
 
 ---
@@ -516,19 +565,19 @@ the throttle; throughput improves; the throttle caps active workers; parallel sp
 ```
 Phase 0 (contracts) --> Phase 1 --> Phase 2 (skeleton) --> from here, parallel:
                                                   |
-                                                  +-- L2 track: Phase 3 -> 4 -> 5 -> 6 -> 7
+                                                  +-- L2 track: Phase 3 -> 4 -> 5 -> 6 -> 8
                                                   |
-                                                  +-- L3 track: Phase 5 (storage) -> Phase 8 -> 9 -> 10
+                                                  +-- L3 track: Phase 5 (storage) -> Phase 9 -> 10 -> 11
                                                   |
-                                                  +-- L1 track: Phase 6 loop controller -> Phase 11 tuning
+                                                  +-- L1 track: Phase 6 loop controller -> Phase 7 executors -> Phase 13 fan-out
 ```
 
 - **Serial spine (everyone depends on):** Phase 0 -> 1 -> 2.
 - **After Phase 2**, the three lanes proceed largely in parallel:
-  - **L2** drives the agent chain (3 -> 4 -> 5 fetch -> 6 -> 7).
-  - **L3** drives storage (5) + persistence/export/memory (8 -> 9 -> 10), and can start storage early.
-  - **L1** owns loop controller/verdict routing (6), the **synchronous run harness (1)**, and **fan-out/parallelization (12)** plus throttle tuning (11).
-- **Integration sync points:** end of Phase 0 (contracts), end of Phase 2 (loop shape), and before Phase 8 (ResultItem schema final).
+  - **L2** drives the agent chain (3 -> 4 -> 5 fetch -> 6 -> 8).
+  - **L3** drives storage (5) + persistence/export/memory (9 -> 10 -> 11), and can start storage early.
+  - **L1** owns loop controller/verdict routing (6), the **per-step executor decomposition (7)**, the **synchronous run harness (1)**, and **fan-out/parallelization (13)** plus throttle tuning (12).
+- **Integration sync points:** end of Phase 0 (contracts), end of Phase 2 (loop shape), and before Phase 9 (ResultItem schema final).
 
 ---
 
