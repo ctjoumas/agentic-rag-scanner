@@ -327,12 +327,12 @@ internal sealed class RbacRunner
         }
 
         (bool ok, string uid, string err) = TryLookupSignedInUser(context);
-        
+
         if (!ok && IsCaeFailure(err))
         {
             RbacExecutionContext.PrintStep("Device code login required to establish a fresh token...");
             RbacExecutionContext.PrintStep("After login, this token will be cached and reused for all RBAC assignments.");
-            
+
             List<string> loginArgs = ["az", "login", "--use-device-code"];
             if (!string.IsNullOrWhiteSpace(tenantId))
             {
@@ -358,7 +358,7 @@ internal sealed class RbacRunner
                 {
                     break;
                 }
-                
+
                 if (attempt < 3 && IsCaeFailure(err))
                 {
                     RbacExecutionContext.PrintWarning($"Graph API still blocked by CAE (attempt {attempt}/3), retrying in 5 seconds...");
@@ -375,12 +375,12 @@ internal sealed class RbacRunner
                 RbacExecutionContext.PrintWarning("Conditional Access policies prevent Graph API access for object ID lookup.");
                 RbacExecutionContext.PrintStep("Using fallback: user principal name (UPN) from cached credentials...");
                 RbacExecutionContext.PrintStep("Note: Some RBAC assignments may fail and will need to be configured via Azure Portal.");
-                
+
                 // Try to get UPN from cached login without triggering new auth
                 var upnResult = RbacExecutionContext.RunCommand(
                     ["az", "account", "show", "--query", "user.name", "-o", "tsv"],
                     capture: true);
-                
+
                 if (upnResult.ExitCode == 0)
                 {
                     string upn = upnResult.StdOut.Trim();
@@ -391,7 +391,7 @@ internal sealed class RbacRunner
                     }
                 }
             }
-            
+
             RbacExecutionContext.PrintError("Could not retrieve user identity.");
             throw new InvalidOperationException("Could not retrieve signed-in user identity.");
         }
