@@ -28,10 +28,18 @@ internal sealed class RbacRunner
             RbacExecutionContext.PrintSection("Target principal");
             RbacExecutionContext.PrintSuccess($"Granting roles to {options.PrincipalType}: {label}");
         }
+        else if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AZURE_RBAC_PRINCIPAL_ID")))
+        {
+            principalId = Environment.GetEnvironmentVariable("AZURE_RBAC_PRINCIPAL_ID")!;
+            assigneeIsObjectId = true;
+            context.PrincipalType = "User";
+            RbacExecutionContext.PrintSection("Target principal");
+            RbacExecutionContext.PrintSuccess($"Using principal ID from AZURE_RBAC_PRINCIPAL_ID env var: {principalId}");
+        }
         else
         {
-            principalId = GetCurrentUserId(context, options.TenantId);
-            assigneeIsObjectId = false;
+            (principalId, assigneeIsObjectId) = GetCurrentUserId(context, options.TenantId);
+            context.PrincipalType = "User";
         }
 
         RbacExecutionContext.PrintSection("Resources to configure");
@@ -301,7 +309,7 @@ internal sealed class RbacRunner
         }
     }
 
-    private static string GetCurrentUserId(RbacExecutionContext context, string? tenantId)
+    private static (string principalId, bool isObjectId) GetCurrentUserId(RbacExecutionContext context, string? tenantId)
     {
         RbacExecutionContext.PrintSection("Signed-in user identity");
 
@@ -319,10 +327,13 @@ internal sealed class RbacRunner
         }
 
         (bool ok, string uid, string err) = TryLookupSignedInUser(context);
+        
         if (!ok && IsCaeFailure(err))
         {
-            RbacExecutionContext.PrintStep("Token rejected by Conditional Access - refreshing credentials via interactive login...");
-            List<string> loginArgs = ["az", "login"];
+            RbacExecutionContext.PrintStep("Device code login required to establish a fresh token...");
+            RbacExecutionContext.PrintStep("After login, this token will be cached and reused for all RBAC assignments.");
+            
+            List<string> loginArgs = ["az", "login", "--use-device-code"];
             if (!string.IsNullOrWhiteSpace(tenantId))
             {
                 loginArgs.Add("--tenant");
@@ -332,41 +343,61 @@ internal sealed class RbacRunner
             var loginResult = RbacExecutionContext.RunCommand(loginArgs, capture: false);
             if (loginResult.ExitCode != 0)
             {
-                RbacExecutionContext.PrintError("Interactive login failed.");
-                throw new InvalidOperationException("Interactive login failed.");
+                RbacExecutionContext.PrintError("Device code login failed.");
+                throw new InvalidOperationException("Device code login failed.");
             }
 
-            (ok, uid, err) = TryLookupSignedInUser(context);
+            // Wait for token cache to refresh
+            System.Threading.Thread.Sleep(3000);
+
+            // Retry Graph API call a few times - CAE challenge may take a moment to resolve
+            for (int attempt = 1; attempt <= 3; attempt++)
+            {
+                (ok, uid, err) = TryLookupSignedInUser(context);
+                if (ok && !string.IsNullOrWhiteSpace(uid))
+                {
+                    break;
+                }
+                
+                if (attempt < 3 && IsCaeFailure(err))
+                {
+                    RbacExecutionContext.PrintWarning($"Graph API still blocked by CAE (attempt {attempt}/3), retrying in 5 seconds...");
+                    System.Threading.Thread.Sleep(5000);
+                }
+            }
         }
 
         if (!ok || string.IsNullOrWhiteSpace(uid))
         {
             bool caeFailure = IsCaeFailure(err);
-            if (!string.IsNullOrWhiteSpace(err) && !caeFailure)
+            if (caeFailure)
             {
-                RbacExecutionContext.PrintDetail(err);
+                RbacExecutionContext.PrintWarning("Conditional Access policies prevent Graph API access for object ID lookup.");
+                RbacExecutionContext.PrintStep("Using fallback: user principal name (UPN) from cached credentials...");
+                RbacExecutionContext.PrintStep("Note: Some RBAC assignments may fail and will need to be configured via Azure Portal.");
+                
+                // Try to get UPN from cached login without triggering new auth
+                var upnResult = RbacExecutionContext.RunCommand(
+                    ["az", "account", "show", "--query", "user.name", "-o", "tsv"],
+                    capture: true);
+                
+                if (upnResult.ExitCode == 0)
+                {
+                    string upn = upnResult.StdOut.Trim();
+                    if (!string.IsNullOrWhiteSpace(upn))
+                    {
+                        RbacExecutionContext.PrintSuccess($"Using cached user principal: {upn}");
+                        return (upn, false); // false = not an object ID, it's a UPN
+                    }
+                }
             }
-            else if (caeFailure)
-            {
-                RbacExecutionContext.PrintWarning("Could not resolve signed-in user object ID due Conditional Access token challenge.");
-            }
-
-            // Fallback for CAE/Graph challenges: use the signed-in user principal name.
-            var accountUser = RbacExecutionContext.RunCommand(["az", "account", "show", "--only-show-errors", "--query", "user.name", "-o", "tsv"], capture: true);
-            string upn = accountUser.StdOut.Trim();
-            if (!string.IsNullOrWhiteSpace(upn))
-            {
-                RbacExecutionContext.PrintWarning("Using signed-in user principal name for RBAC assignment.");
-                RbacExecutionContext.PrintSuccess($"User principal: {upn}");
-                return upn;
-            }
-
-            RbacExecutionContext.PrintError("Could not retrieve signed-in user identity.");
+            
+            RbacExecutionContext.PrintError("Could not retrieve user identity.");
             throw new InvalidOperationException("Could not retrieve signed-in user identity.");
         }
 
         RbacExecutionContext.PrintSuccess($"User object ID: {uid}");
-        return uid;
+        return (uid, true); // true = it's an object ID (GUID)
     }
 
     private static (bool Ok, string UserId, string Error) TryLookupSignedInUser(RbacExecutionContext context)
