@@ -131,8 +131,77 @@ Cognitive Services roles).
 ### Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
+- [Azure Developer CLI (`azd`)](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd)
 - An Azure subscription with the [required services](#required-azure-services) provisioned
 - Azure CLI signed in (`az login`) so `DefaultAzureCredential` can authenticate locally
+
+### Provision infrastructure with azd
+
+The repository includes Bicep infrastructure in `infra/` and a post-provision hook configured in
+`azure.yaml`.
+
+When you run `azd up` or `azd provision`, the post-provision hook performs these actions:
+
+* Assigns RBAC roles to the signed-in user for local development.
+* Assigns RBAC roles to the Foundry account and Foundry project managed identities.
+* Optionally assigns RBAC roles to an additional principal via `AZURE_RBAC_PRINCIPAL_ID`.
+* Upserts Bing Custom Search configuration.
+* Creates the Foundry project connection for Bing.
+* Deploys or updates the Bing-grounded Foundry agent.
+
+Runbook:
+
+1. Authenticate once.
+
+  ```powershell
+  azd auth login
+  ```
+
+2. Create or select an environment.
+
+  ```powershell
+  azd env new <env-name>
+  ```
+
+3. Optional: set a stable base name for Azure resources.
+
+  ```powershell
+  azd env set AZURE_BASE_NAME <base-name>
+  ```
+
+4. If your tenant blocks Graph API lookups with Conditional Access, set your Entra object ID to
+  avoid interactive principal resolution during RBAC setup.
+
+  ```powershell
+  azd env set AZURE_RBAC_PRINCIPAL_ID <user-object-id-guid>
+  ```
+
+5. Optional: control Bing agent deployment behavior.
+
+  ```powershell
+  azd env set DEPLOY_BING_AGENT_ON_PROVISION true
+  azd env set FOUNDRY_BING_CONNECTION_NAME <connection-name>
+  azd env set FOUNDRY_BING_INSTANCE_NAME <bing-instance-name>
+  ```
+
+6. Provision infrastructure and run post-provision automation.
+
+  ```powershell
+  azd up --no-prompt
+  ```
+
+7. For a clean reprovision cycle, tear down and provision again.
+
+  ```powershell
+  azd down --no-prompt
+  azd up --no-prompt
+  ```
+
+> [!IMPORTANT]
+> If your tenant enforces strict Conditional Access and `az ad signed-in-user show` returns
+> `InteractionRequired` or `TokenCreatedWithOutdatedPolicies`, set
+> `AZURE_RBAC_PRINCIPAL_ID` to your user object ID. This bypasses Graph object ID lookup in the
+> RBAC tool and prevents repeated authentication prompts.
 
 ### Configure
 
@@ -170,6 +239,15 @@ The API starts at `https://localhost:7022` and opens the Scalar API docs at
 
 VS Code tasks are also provided: `build`, `run-api`, `watch-api`, `run-tests`, and
 `run-tests-with-coverage`.
+
+### Infrastructure CLI tools
+
+The `infra/tools` folder contains helper CLIs used by the `azd` post-provision workflow:
+
+* `AgenticRagScanner.RbacCli` assigns ARM and service-specific RBAC roles.
+* `AgenticRagScanner.BingCustomSearchCli` upserts Bing Custom Search configuration and Foundry
+  connections.
+* `AgenticRagScanner.DeployAgentCli` deploys or updates the Bing-grounded Foundry agent from YAML.
 
 ### Trigger a scan
 
