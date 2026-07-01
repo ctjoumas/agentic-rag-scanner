@@ -24,7 +24,8 @@
   "Cosmos": {
     "Endpoint": "https://cosmoswxdev001.documents.azure.com:443/",
     "Database": "agentic-rag-scanner",
-    "CheckpointsContainer": "checkpoints"
+    "CheckpointsContainer": "checkpoints",
+    "RegDocsContainer": "regdocs"
   },
   "WebSearch": {
     "ProjectEndpoint": "https://<your-foundry-resource>.services.ai.azure.com/api/projects/<your-project>",

@@ -43,6 +43,9 @@ param cosmosDatabaseName string = 'agentic-rag-scanner'
 @description('Name of the SQL container in Cosmos DB.')
 param cosmosContainerName string = 'results'
 
+@description('Name of the SQL container in Cosmos DB for the generic document (RegDocs) repository.')
+param regDocsContainerName string = 'regdocs'
+
 @description('Create a Foundry project under the Foundry account.')
 param deployFoundryProject bool = false
 
@@ -90,6 +93,7 @@ module cosmosModule './modules/cosmos.bicep' = {
     accountName: cosmosAccountName
     databaseName: cosmosDatabaseName
     containerName: cosmosContainerName
+    regDocsContainerName: regDocsContainerName
     tags: tags
   }
 }

@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.44.1.10279",
-      "templateHash": "7620465290760158428"
+      "version": "0.42.1.51946",
+      "templateHash": "16093093982264977906"
     }
   },
   "parameters": {
@@ -78,6 +78,13 @@
         "description": "Name of the SQL container in Cosmos DB."
       }
     },
+    "regDocsContainerName": {
+      "type": "string",
+      "defaultValue": "regdocs",
+      "metadata": {
+        "description": "Name of the SQL container in Cosmos DB for the generic document (RegDocs) repository."
+      }
+    },
     "deployFoundryProject": {
       "type": "bool",
       "defaultValue": false,
@@ -90,6 +97,49 @@
       "defaultValue": "",
       "metadata": {
         "description": "Foundry project name when deployFoundryProject is true."
+      }
+    },
+    "deployFoundryModelDeployment": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Create a Foundry OpenAI model deployment under the Foundry account."
+      }
+    },
+    "foundryModelDeploymentName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Foundry OpenAI model deployment name."
+      }
+    },
+    "foundryModelName": {
+      "type": "string",
+      "defaultValue": "gpt-5.4",
+      "metadata": {
+        "description": "OpenAI model name to deploy in Foundry."
+      }
+    },
+    "foundryModelVersion": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "OpenAI model version to deploy in Foundry."
+      }
+    },
+    "foundryModelDeploymentSkuName": {
+      "type": "string",
+      "defaultValue": "GlobalStandard",
+      "metadata": {
+        "description": "SKU name for the Foundry OpenAI model deployment."
+      }
+    },
+    "foundryModelDeploymentSkuCapacity": {
+      "type": "int",
+      "defaultValue": 1,
+      "minValue": 1,
+      "metadata": {
+        "description": "SKU capacity for the Foundry OpenAI model deployment."
       }
     },
     "deployBingCustomSearch": {
@@ -135,6 +185,9 @@
           "containerName": {
             "value": "[parameters('cosmosContainerName')]"
           },
+          "regDocsContainerName": {
+            "value": "[parameters('regDocsContainerName')]"
+          },
           "tags": {
             "value": "[parameters('tags')]"
           }
@@ -145,8 +198,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "15345203540965518709"
+              "version": "0.42.1.51946",
+              "templateHash": "12614387557713092013"
             }
           },
           "parameters": {
@@ -172,6 +225,19 @@
               "type": "string",
               "metadata": {
                 "description": "Cosmos DB SQL container name."
+              }
+            },
+            "regDocsContainerName": {
+              "type": "string",
+              "metadata": {
+                "description": "Cosmos DB SQL container name for the generic document (RegDocs) repository."
+              }
+            },
+            "regDocsPartitionKeyPath": {
+              "type": "string",
+              "defaultValue": "/doc_type",
+              "metadata": {
+                "description": "Partition key path for the RegDocs container."
               }
             },
             "tags": {
@@ -258,6 +324,39 @@
               "dependsOn": [
                 "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
               ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), parameters('regDocsContainerName'))]",
+              "properties": {
+                "resource": {
+                  "id": "[parameters('regDocsContainerName')]",
+                  "partitionKey": {
+                    "paths": [
+                      "[parameters('regDocsPartitionKeyPath')]"
+                    ],
+                    "kind": "Hash"
+                  },
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "automatic": true,
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
             }
           ],
           "outputs": {
@@ -299,8 +398,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "10791372988839765328"
+              "version": "0.42.1.51946",
+              "templateHash": "10228993623316536625"
             }
           },
           "parameters": {
@@ -409,6 +508,24 @@
           "projectName": {
             "value": "[parameters('foundryProjectName')]"
           },
+          "deployModelDeployment": {
+            "value": "[parameters('deployFoundryModelDeployment')]"
+          },
+          "modelDeploymentName": {
+            "value": "[parameters('foundryModelDeploymentName')]"
+          },
+          "modelName": {
+            "value": "[parameters('foundryModelName')]"
+          },
+          "modelVersion": {
+            "value": "[parameters('foundryModelVersion')]"
+          },
+          "modelDeploymentSkuName": {
+            "value": "[parameters('foundryModelDeploymentSkuName')]"
+          },
+          "modelDeploymentSkuCapacity": {
+            "value": "[parameters('foundryModelDeploymentSkuCapacity')]"
+          },
           "tags": {
             "value": "[parameters('tags')]"
           }
@@ -419,8 +536,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "9618556127705865482"
+              "version": "0.42.1.51946",
+              "templateHash": "14851136707433183304"
             }
           },
           "parameters": {
@@ -450,6 +567,49 @@
                 "description": "Foundry project name to create when deployProject is true."
               }
             },
+            "deployModelDeployment": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Deploy an OpenAI model deployment under the Foundry account."
+              }
+            },
+            "modelDeploymentName": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Model deployment name under the Foundry account."
+              }
+            },
+            "modelName": {
+              "type": "string",
+              "defaultValue": "gpt-5.4",
+              "metadata": {
+                "description": "OpenAI model name to deploy (for example: gpt-5.4)."
+              }
+            },
+            "modelVersion": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "OpenAI model version to deploy (for example: 2025-06-01)."
+              }
+            },
+            "modelDeploymentSkuName": {
+              "type": "string",
+              "defaultValue": "GlobalStandard",
+              "metadata": {
+                "description": "SKU name for the model deployment."
+              }
+            },
+            "modelDeploymentSkuCapacity": {
+              "type": "int",
+              "defaultValue": 1,
+              "minValue": 1,
+              "metadata": {
+                "description": "SKU capacity for the model deployment."
+              }
+            },
             "tags": {
               "type": "object",
               "defaultValue": {},
@@ -457,6 +617,9 @@
                 "description": "Tags applied to Foundry resources."
               }
             }
+          },
+          "variables": {
+            "deployedModel": "[if(empty(parameters('modelVersion')), createObject('format', 'OpenAI', 'name', parameters('modelName')), createObject('format', 'OpenAI', 'name', parameters('modelName'), 'version', parameters('modelVersion')))]"
           },
           "resources": [
             {
@@ -492,6 +655,22 @@
               "dependsOn": [
                 "[resourceId('Microsoft.CognitiveServices/accounts', parameters('accountName'))]"
               ]
+            },
+            {
+              "condition": "[parameters('deployModelDeployment')]",
+              "type": "Microsoft.CognitiveServices/accounts/deployments",
+              "apiVersion": "2025-06-01",
+              "name": "[format('{0}/{1}', parameters('accountName'), parameters('modelDeploymentName'))]",
+              "sku": {
+                "name": "[parameters('modelDeploymentSkuName')]",
+                "capacity": "[parameters('modelDeploymentSkuCapacity')]"
+              },
+              "properties": {
+                "model": "[variables('deployedModel')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', parameters('accountName'))]"
+              ]
             }
           ],
           "outputs": {
@@ -510,6 +689,10 @@
             "foundryProjectPrincipalId": {
               "type": "string",
               "value": "[if(parameters('deployProject'), reference(resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('accountName'), parameters('projectName')), '2025-06-01', 'full').identity.principalId, '')]"
+            },
+            "foundryModelDeploymentName": {
+              "type": "string",
+              "value": "[if(parameters('deployModelDeployment'), parameters('modelDeploymentName'), '')]"
             }
           }
         }
@@ -539,8 +722,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "10058813864298172306"
+              "version": "0.42.1.51946",
+              "templateHash": "1965730083872314309"
             }
           },
           "parameters": {
@@ -617,8 +800,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "12882531952401609359"
+              "version": "0.42.1.51946",
+              "templateHash": "12928880597883021901"
             }
           },
           "parameters": {
@@ -701,8 +884,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "4108424675020500801"
+              "version": "0.42.1.51946",
+              "templateHash": "9094017701275553563"
             }
           },
           "parameters": {
@@ -794,8 +977,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.44.1.10279",
-              "templateHash": "7286043702559909622"
+              "version": "0.42.1.51946",
+              "templateHash": "5928237326443783901"
             }
           },
           "parameters": {
@@ -914,6 +1097,10 @@
     "foundryProjectPrincipalId": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundryDeployment'), '2025-04-01').outputs.foundryProjectPrincipalId.value]"
+    },
+    "foundryDeployedModelDeploymentName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundryDeployment'), '2025-04-01').outputs.foundryModelDeploymentName.value]"
     },
     "cosmosEndpoint": {
       "type": "string",

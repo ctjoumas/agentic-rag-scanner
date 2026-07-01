@@ -89,4 +89,46 @@ public class OptionsValidationTests
 
         Validate(options).Should().Contain(r => r.MemberNames.Contains(nameof(WebSearchOptions.AgentName)));
     }
+
+    [Fact]
+    public void CosmosOptions_WhenFullyConfigured_ShouldBeValid()
+    {
+        var options = new CosmosOptions
+        {
+            Endpoint = "https://cosmos.example.com",
+            Database = "agentic-rag-scanner",
+            CheckpointsContainer = "checkpoints",
+            RegDocsContainer = "regdocs",
+        };
+
+        Validate(options).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void CosmosOptions_WithEmptyRegDocsContainer_ShouldFailRequired()
+    {
+        var options = new CosmosOptions
+        {
+            Endpoint = "https://cosmos.example.com",
+            Database = "agentic-rag-scanner",
+            CheckpointsContainer = "checkpoints",
+            RegDocsContainer = "",
+        };
+
+        Validate(options).Should().Contain(r => r.MemberNames.Contains(nameof(CosmosOptions.RegDocsContainer)));
+    }
+
+    [Fact]
+    public void CosmosOptions_WithNonUrlEndpoint_ShouldFailUrl()
+    {
+        var options = new CosmosOptions
+        {
+            Endpoint = "<your-cosmos-endpoint>",  // placeholder must NOT pass [Url]
+            Database = "agentic-rag-scanner",
+            CheckpointsContainer = "checkpoints",
+            RegDocsContainer = "regdocs",
+        };
+
+        Validate(options).Should().Contain(r => r.MemberNames.Contains(nameof(CosmosOptions.Endpoint)));
+    }
 }
