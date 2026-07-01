@@ -69,7 +69,7 @@ public sealed class WebSearchAgent : IWebSearchAgent
                 .SelectMany(m => m.Contents)
                 .SelectMany(c => c.Annotations ?? []))
             {
-                if (!TryExtractCitation(annotation, out var url, out var title, out var snippet))
+                if (!TryExtractCitation(annotation, out var url, out var title))
                 {
                     continue;
                 }
@@ -95,7 +95,6 @@ public sealed class WebSearchAgent : IWebSearchAgent
                 {
                     Url = url,
                     Title = title,
-                    Snippet = snippet,
                     Domain = uri.Host,
                     SourceQuery = query,
                     Rank = ++rank,
@@ -120,9 +119,20 @@ public sealed class WebSearchAgent : IWebSearchAgent
 
             return hits;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            // A cancellation whose token is NOT the caller's comes from the SDK network timeout
+            // (AIProjectClient.NetworkTimeout). Treat it like any other failed search: log a concise
+            // warning and degrade gracefully rather than aborting the run.
+            _logger.LogWarning(
+                ex,
+                "WebSearch: query '{Query}' was canceled by an SDK network timeout; returning no hits.",
+                query);
+            return [];
         }
         catch (TimeoutRejectedException)
         {
@@ -143,21 +153,19 @@ public sealed class WebSearchAgent : IWebSearchAgent
 
     /// <summary>
     /// Extracts a URL citation from a MAF annotation. Grounding with Bing surfaces sources as
-    /// <see cref="CitationAnnotation"/> entries carrying the resolved URL, title, and snippet.
+    /// <see cref="CitationAnnotation"/> entries carrying the resolved URL and title.
     /// </summary>
-    private static bool TryExtractCitation(AIAnnotation annotation, out string url, out string? title, out string? snippet)
+    private static bool TryExtractCitation(AIAnnotation annotation, out string url, out string? title)
     {
         if (annotation is CitationAnnotation citation && citation.Url is { } uri)
         {
             url = uri.ToString();
             title = citation.Title;
-            snippet = citation.Snippet;
             return true;
         }
 
         url = string.Empty;
         title = null;
-        snippet = null;
         return false;
     }
 

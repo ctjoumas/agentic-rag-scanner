@@ -6,7 +6,7 @@ namespace AgenticRagScannerApi.Workflows.Steps;
 /// <summary>
 /// Full-text fetch &amp; clean step (scaffold for Epic 2): turns a <see cref="SearchHit"/> into a
 /// <see cref="FetchedDocument"/>. The real step (Epic 5) fetches HTML/PDF, strips boilerplate, and on
-/// failure falls back to the Bing snippet with <see cref="FetchedDocument.Unverified"/> set - it
+/// failure flags the document <see cref="FetchedDocument.Unverified"/> (no cleaned text) - it
 /// never drops a document.
 /// </summary>
 public interface IFetchAndCleanStep

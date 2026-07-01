@@ -36,13 +36,13 @@ public sealed class FetchAndCleanStep : IFetchAndCleanStep
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
             _logger.LogWarning(
-                "Fetch skipped for {Url} (not an absolute http/https URL); falling back to snippet.",
+                "Fetch skipped for {Url} (not an absolute http/https URL); marking unverified.",
                 hit.Url);
             return Fallback(hit);
         }
 
         // Bound the whole fetch by the configured timeout. A caller-initiated cancellation propagates;
-        // a timeout is just another fetch failure and degrades to the snippet fallback.
+        // a timeout is just another fetch failure and degrades to the unverified fallback.
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(_options.RequestTimeout);
 
@@ -56,13 +56,13 @@ public sealed class FetchAndCleanStep : IFetchAndCleanStep
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("Fetch timed out after {Timeout}s for {Url}; falling back to snippet.",
+            _logger.LogWarning("Fetch timed out after {Timeout}s for {Url}; marking unverified.",
                 _options.RequestTimeoutSeconds, hit.Url);
             return Fallback(hit);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Fetch failed for {Url}; falling back to snippet.", hit.Url);
+            _logger.LogWarning(ex, "Fetch failed for {Url}; marking unverified.", hit.Url);
             return Fallback(hit);
         }
     }
@@ -83,7 +83,7 @@ public sealed class FetchAndCleanStep : IFetchAndCleanStep
 
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogWarning("Fetch for {Url} returned {Status}; falling back to snippet.",
+            _logger.LogWarning("Fetch for {Url} returned {Status}; marking unverified.",
                 hit.Url, (int)response.StatusCode);
             return Fallback(hit);
         }
@@ -92,14 +92,14 @@ public sealed class FetchAndCleanStep : IFetchAndCleanStep
         if (mediaType is null ||
             !_options.AllowedContentTypes.Contains(mediaType, StringComparer.OrdinalIgnoreCase))
         {
-            _logger.LogWarning("Fetch for {Url} returned disallowed content type '{ContentType}'; falling back to snippet.",
+            _logger.LogWarning("Fetch for {Url} returned disallowed content type '{ContentType}'; marking unverified.",
                 hit.Url, mediaType ?? "(none)");
             return Fallback(hit);
         }
 
         if (response.Content.Headers.ContentLength is long declared && declared > _options.MaxResponseBytes)
         {
-            _logger.LogWarning("Fetch for {Url} exceeds size cap ({Declared} > {Cap} bytes); falling back to snippet.",
+            _logger.LogWarning("Fetch for {Url} exceeds size cap ({Declared} > {Cap} bytes); marking unverified.",
                 hit.Url, declared, _options.MaxResponseBytes);
             return Fallback(hit);
         }
@@ -108,7 +108,7 @@ public sealed class FetchAndCleanStep : IFetchAndCleanStep
             .ConfigureAwait(false);
         if (bytes is null)
         {
-            _logger.LogWarning("Fetch for {Url} exceeded size cap while streaming; falling back to snippet.", hit.Url);
+            _logger.LogWarning("Fetch for {Url} exceeded size cap while streaming; marking unverified.", hit.Url);
             return Fallback(hit);
         }
 
@@ -118,7 +118,7 @@ public sealed class FetchAndCleanStep : IFetchAndCleanStep
 
         if (string.IsNullOrWhiteSpace(cleaned))
         {
-            _logger.LogWarning("Fetch for {Url} produced no usable text; falling back to snippet.", hit.Url);
+            _logger.LogWarning("Fetch for {Url} produced no usable text; marking unverified.", hit.Url);
             return Fallback(hit);
         }
 
@@ -175,13 +175,13 @@ public sealed class FetchAndCleanStep : IFetchAndCleanStep
     }
 
     /// <summary>
-    /// Snippet fallback: never drops the document. The Bing snippet becomes the (unverified) cleaned
-    /// text; relevance/discard decisions happen later at the eval step (Epic 6), not here.
+    /// Fetch-failure fallback: never drops the document. It is flagged <see cref="FetchedDocument.Unverified"/>
+    /// with no cleaned text; relevance/discard decisions happen later at the eval step (Epic 6), not here.
     /// </summary>
     private static FetchedDocument Fallback(SearchHit hit) => new()
     {
         Hit = hit,
-        CleanedText = string.IsNullOrWhiteSpace(hit.Snippet) ? null : hit.Snippet,
+        CleanedText = null,
         Unverified = true,
     };
 }

@@ -175,7 +175,6 @@ internal sealed class FakeWebSearchAgent : IWebSearchAgent
             {
                 Url = $"https://{host}/canned/{slug}/{i}",
                 Title = $"Canned result {i + 1} for '{query}'",
-                Snippet = $"Canned snippet for '{query}'.",
                 Domain = host,
                 SourceQuery = query,
                 Rank = i + 1,
