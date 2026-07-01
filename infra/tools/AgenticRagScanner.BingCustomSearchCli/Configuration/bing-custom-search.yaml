@@ -1,0 +1,9 @@
+configuration_name: Jurisdictions
+allowed_domains:
+- domain: https://www.gov.uk/government/organisations/hm-revenue-customs
+  include_sub_pages: false
+- domain: https://www.supremecourt.uk
+  include_sub_pages: true
+- domain: https://www.legislation.gov.uk
+  include_sub_pages: true
+blocked_domains: []

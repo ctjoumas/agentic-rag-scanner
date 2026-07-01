@@ -1,0 +1,11 @@
+name: bing-grounding-agent
+version: "1"
+description: "Foundry web search agent grounded with Bing Custom Search and restricted to the configured primary-source allowlist."
+definition:
+  model: gpt-5.4
+  instructions: Use the Grounding with Bing Custom Search, when conducting searches. You must restrict your search to only the tool and tool configuration.
+  reasoning:
+    effort: medium
+  tools:
+  - type: web_search
+  tool_choice: required

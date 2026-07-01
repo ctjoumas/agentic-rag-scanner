@@ -44,7 +44,7 @@ if ($env:FOUNDRYNAME) {
             if ($LASTEXITCODE -ne 0) {
                 $msg = ($createResult | Out-String)
                 if ($msg -match 'RoleAssignmentExists') {
-                    Write-Host "  [OK] '$role' already assigned on $($env:FOUNDRYNAME)" -ForegroundColor DarkGray
+                    Write-Host "  [WARN] '$role' already assigned on $($env:FOUNDRYNAME)" -ForegroundColor Yellow
                 }
                 else {
                     Write-Error "Failed to assign '$role' to Foundry resource MI. $msg"
@@ -103,4 +103,141 @@ if ($env:AZURE_RBAC_PRINCIPAL_ID) {
     }
 }
 
-Write-Host "`n=== RBAC setup complete ===" -ForegroundColor Green
+# 5. Deploy/update the Bing-grounded Foundry agent during provisioning.
+$deployAgentOnProvision = ($env:DEPLOY_BING_AGENT_ON_PROVISION ?? 'true').ToLowerInvariant()
+if ($deployAgentOnProvision -eq 'true') {
+    Write-Host "`n--- Upserting Bing Custom Search configuration ---" -ForegroundColor Cyan
+
+    $bingCliProjectPath = Join-Path $PSScriptRoot '..\tools\AgenticRagScanner.BingCustomSearchCli\AgenticRagScanner.BingCustomSearchCli.csproj'
+    $bingConfigurationPath = Join-Path $PSScriptRoot '..\tools\AgenticRagScanner.BingCustomSearchCli\Configuration\bing-custom-search.yaml'
+
+    if (-not $env:BINGCUSTOMSEARCHACCOUNTNAME) {
+        Write-Error "Cannot configure Bing Custom Search: BINGCUSTOMSEARCHACCOUNTNAME is not set."
+        exit 1
+    }
+
+    $bingConnectionName = $env:FOUNDRY_BING_CONNECTION_NAME
+    if (-not $bingConnectionName -or $bingConnectionName -eq 'bing-custom-search') {
+        $bingConnectionName = $env:BINGCUSTOMSEARCHACCOUNTNAME
+        azd env set FOUNDRY_BING_CONNECTION_NAME $bingConnectionName | Out-Null
+    }
+
+    $upsertOutput = & dotnet run --project $bingCliProjectPath -- upsert `
+        --subscription $env:AZURE_SUBSCRIPTION_ID `
+        --resource-group $env:AZURE_RESOURCE_GROUP `
+        --bing-account-name $env:BINGCUSTOMSEARCHACCOUNTNAME `
+        --bing-configuration-path $bingConfigurationPath `
+        --output-format json 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "BingCustomSearchCli failed during postprovision (exit code $LASTEXITCODE)."
+        exit $LASTEXITCODE
+    }
+
+    $bingInstanceName = $null
+    $upsertJsonLine = $upsertOutput | Where-Object { $_ -like 'BING_CUSTOM_SEARCH_RESULT:*' } | Select-Object -Last 1
+    if ($upsertJsonLine) {
+        try {
+            $upsertJson = ($upsertJsonLine -replace '^BING_CUSTOM_SEARCH_RESULT:\s*', '') | ConvertFrom-Json
+            if ($upsertJson.configurationName) {
+                $bingInstanceName = [string]$upsertJson.configurationName
+                azd env set FOUNDRY_BING_INSTANCE_NAME $bingInstanceName | Out-Null
+            }
+        }
+        catch {
+            Write-Host "[WARN] Could not parse Bing upsert JSON output. Falling back to configured instance name." -ForegroundColor Yellow
+        }
+    }
+
+    Write-Host "`n--- Creating Foundry project connection for Bing Custom Search ---" -ForegroundColor Cyan
+
+    if (-not $env:FOUNDRYNAME) {
+        Write-Error "Cannot create connection: FOUNDRYNAME is not set."
+        exit 1
+    }
+
+    if (-not $env:FOUNDRYPROJECTNAME) {
+        Write-Error "Cannot create connection: FOUNDRYPROJECTNAME is not set."
+        exit 1
+    }
+
+    & dotnet run --project $bingCliProjectPath -- create-connection `
+        --subscription $env:AZURE_SUBSCRIPTION_ID `
+        --resource-group $env:AZURE_RESOURCE_GROUP `
+        --bing-account-name $env:BINGCUSTOMSEARCHACCOUNTNAME `
+        --foundry-account-name $env:FOUNDRYNAME `
+        --foundry-project-name $env:FOUNDRYPROJECTNAME `
+        --connection-name $bingConnectionName `
+        --connection-display-name "Bing Custom Search" `
+        --output-format json
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to create Foundry project connection (exit code $LASTEXITCODE)."
+        exit $LASTEXITCODE
+    }
+
+    Write-Host "`n--- Deploying Bing-grounded Foundry agent ---" -ForegroundColor Cyan
+
+    $deployCliProjectPath = Join-Path $PSScriptRoot '..\tools\AgenticRagScanner.DeployAgentCli\AgenticRagScanner.DeployAgentCli.csproj'
+    $agentYamlPath = Join-Path $PSScriptRoot '..\tools\AgenticRagScanner.DeployAgentCli\Configuration\bing-grounding-agent.yaml'
+
+    $projectEndpoint = $env:FOUNDRY_PROJECT_ENDPOINT
+    if (-not $projectEndpoint -and $env:FOUNDRYNAME -and $env:FOUNDRYPROJECTNAME) {
+        $projectEndpoint = "https://$($env:FOUNDRYNAME).services.ai.azure.com/api/projects/$($env:FOUNDRYPROJECTNAME)"
+        azd env set FOUNDRY_PROJECT_ENDPOINT $projectEndpoint | Out-Null
+    }
+
+    if (-not $projectEndpoint) {
+        Write-Error "Cannot deploy agent: FOUNDRY_PROJECT_ENDPOINT is not set and could not be derived."
+        exit 1
+    }
+
+    # Surface the provisioned Foundry model deployment name for app/runtime configuration.
+    $foundryModel = $env:FOUNDRY_MODEL
+    if (-not $foundryModel -and $env:FOUNDRYDEPLOYEDMODELDEPLOYMENTNAME) {
+        $foundryModel = $env:FOUNDRYDEPLOYEDMODELDEPLOYMENTNAME
+        azd env set FOUNDRY_MODEL $foundryModel | Out-Null
+    }
+
+    if (-not $bingInstanceName) {
+        $bingInstanceName = $env:FOUNDRY_BING_INSTANCE_NAME
+    }
+    if (-not $bingInstanceName) {
+        Write-Error "Cannot deploy agent: set FOUNDRY_BING_INSTANCE_NAME (for example: Jurisdictions)."
+        exit 1
+    }
+
+    $deployArgs = @(
+        'deploy',
+        '--endpoint', $projectEndpoint,
+        '--yaml-path', $agentYamlPath,
+        '--bing-custom-search-instance-name', $bingInstanceName,
+        '--output-format', 'json'
+    )
+
+    if ($foundryModel) {
+        $deployArgs += @('--model', $foundryModel)
+    }
+
+    if ($env:FOUNDRY_BING_CONNECTION_ID) {
+        $deployArgs += @('--bing-custom-search-connection-id', $env:FOUNDRY_BING_CONNECTION_ID)
+    }
+    elseif ($env:FOUNDRY_BING_CONNECTION_NAME) {
+        $deployArgs += @('--bing-custom-search-connection-name', $env:FOUNDRY_BING_CONNECTION_NAME)
+    }
+    elseif ($env:BINGCUSTOMSEARCHACCOUNTNAME) {
+        # Default to the connection created just above in this script.
+        $deployArgs += @('--bing-custom-search-connection-name', $bingConnectionName)
+        azd env set FOUNDRY_BING_CONNECTION_NAME $bingConnectionName | Out-Null
+    }
+    else {
+        Write-Error "Cannot deploy agent: set FOUNDRY_BING_CONNECTION_NAME (recommended) or FOUNDRY_BING_CONNECTION_ID."
+        exit 1
+    }
+
+    & dotnet run --project $deployCliProjectPath -- @deployArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "DeployAgentCli failed during postprovision (exit code $LASTEXITCODE)."
+        exit $LASTEXITCODE
+    }
+}
+
+Write-Host "`n=== azd postprovision complete ===" -ForegroundColor Green

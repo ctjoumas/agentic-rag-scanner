@@ -194,7 +194,7 @@ internal sealed class CosmosRbacService(RbacExecutionContext context)
         };
 
         string tempFilePath = Path.Combine(Path.GetTempPath(), $"cosmos-role-{Guid.NewGuid():N}.json");
-        File.WriteAllText(tempFilePath, JsonSerializer.Serialize(roleBody, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        File.WriteAllText(tempFilePath, JsonSerializer.Serialize(roleBody, new JsonSerializerOptions { WriteIndented = true }));
 
         try
         {
