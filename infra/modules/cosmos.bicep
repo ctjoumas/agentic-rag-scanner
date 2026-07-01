@@ -10,6 +10,12 @@ param databaseName string
 @description('Cosmos DB SQL container name.')
 param containerName string
 
+@description('Cosmos DB SQL container name for the generic document (RegDocs) repository.')
+param regDocsContainerName string
+
+@description('Partition key path for the RegDocs container.')
+param regDocsPartitionKeyPath string = '/doc_type'
+
 @description('Tags applied to Cosmos resources.')
 param tags object = {}
 
@@ -61,6 +67,36 @@ resource cosmosSqlContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/
       partitionKey: {
         paths: [
           '/topicGroup'
+        ]
+        kind: 'Hash'
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          {
+            path: '/*'
+          }
+        ]
+        excludedPaths: [
+          {
+            path: '/"_etag"/?'
+          }
+        ]
+      }
+    }
+  }
+}
+
+resource cosmosRegDocsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: cosmosSqlDb
+  name: regDocsContainerName
+  properties: {
+    resource: {
+      id: regDocsContainerName
+      partitionKey: {
+        paths: [
+          regDocsPartitionKeyPath
         ]
         kind: 'Hash'
       }

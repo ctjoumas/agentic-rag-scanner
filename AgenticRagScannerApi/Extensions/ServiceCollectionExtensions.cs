@@ -108,6 +108,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IFoundryService, FoundryService>();
         services.AddSingleton<IScanMapper, ScanMapper>();
 
+        // Generic Cosmos DB CRUD repository over the RegDocs container (reuses the CosmosClient singleton).
+        services.AddSingleton(typeof(ICosmosRepository<>), typeof(CosmosRepository<>));
+
         // Shared throttle - Phase 0 pass-through; real TPM/RPM/QPS limits arrive later.
         services.AddSingleton<ISharedThrottle, NoOpThrottle>();
 

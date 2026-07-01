@@ -24,4 +24,8 @@ public sealed class CosmosOptions
     /// <summary>Container for MAF workflow checkpoints (partitioned by checkpoint session id).</summary>
     [Required]
     public string CheckpointsContainer { get; set; } = "checkpoints";
+
+    /// <summary>Container backing the generic document CRUD repository. Name supplied via config.</summary>
+    [Required]
+    public string RegDocsContainer { get; set; } = string.Empty;
 }
