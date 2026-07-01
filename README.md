@@ -84,7 +84,7 @@ For full design details see [docs/horizon-scanner-architecture.md](docs/horizon-
 
 | Project | Purpose |
 |---------|---------|
-| `AgenticRagScannerApi` | ASP.NET Core Web API host — controller, orchestrator, services, DI wiring, configuration, and validation. |
+| `AgenticRagScannerApi` | ASP.NET Core Web API host — controller, orchestrator, services (including a generic Cosmos DB CRUD repository), reference-data seeders, DI wiring, configuration, and validation. |
 | `AgenticRagScannerApi.Core` | Shared domain contracts (`TopicGroup`, `RunContext`, `ResultItem`, verdict/authority enums), runtime types, and the shared-throttle abstraction. |
 | `AgenticRagScannerApi.Workflows` | The per-topic-group MAF workflow — the seven-executor agentic-RAG graph (with conditional loop-back), agents, steps, tools, prompts, and Cosmos-backed checkpointing. |
 | `tests/AgenticRagScannerApi.Tests` | xUnit test project. |
@@ -98,7 +98,7 @@ For full design details see [docs/horizon-scanner-architecture.md](docs/horizon-
 |---------|------|--------|
 | **Microsoft Foundry** (+ model deployment) | Hosts the models behind every LLM call (query synthesis, relevance eval, categorize, summarize). | Required |
 | **Grounding with Bing Custom Search** (Foundry connection) | Web search for the Web Search agent, scoped to the primary-source allowlist. | Required |
-| **Azure Cosmos DB** | Versioned result documents (one per item per run) and MAF workflow checkpointing. | Required |
+| **Azure Cosmos DB** | Versioned result documents (one per item per run), reference-data taxonomies (tags, impact areas), and MAF workflow checkpointing. | Required |
 | **Azure Storage account** (Blob) | Storage for fetched documents, exports, and working artifacts. | Required |
 | **Azure AI Search** | Memory/learnings store (planned/future feature #8). | Optional / Planned |
 | **Application Insights** | Structured logging + telemetry sink (via Serilog). | Optional |
@@ -220,7 +220,8 @@ Runbook:
    - `Foundry` — Foundry endpoint + model deployment name (downstream MAF agents)
    - `WebSearch` — Foundry project endpoint + the name of the pre-provisioned Web Search
      agent (optionally a pinned `AgentVersion`), plus `MaxResults` and `RequestTimeoutSeconds`
-   - `Cosmos` — account endpoint, database, and checkpoints container
+   - `Cosmos` — account endpoint, database, the checkpoints container, and the `RegDocsContainer`
+     (reference-data documents such as tags and impact areas, partitioned by `doc_type`)
    - `AzureStorage` — blob service URI + container names (`documents`, `exports`)
    - `AzureSearch` — search endpoint + index name (planned memory store)
    - `Fetch` — full-text fetch limits (allowed content types, max response size,
@@ -239,6 +240,26 @@ The API starts at `https://localhost:7022` and opens the Scalar API docs at
 
 VS Code tasks are also provided: `build`, `run-api`, `watch-api`, `run-tests`, and
 `run-tests-with-coverage`.
+
+### Seed reference data (optional)
+
+The `RegDocs` Cosmos container holds reference-data documents keyed by `doc_type`. A one-off seeder
+provisions the built-in taxonomies — **tags** and **impact areas** — reusing the app's configuration
+and DI (Cosmos endpoint, database, `RegDocsContainer`, keyless auth) and then exiting without starting
+the web host:
+
+```powershell
+# Seed everything (tags + impact areas)
+dotnet run --project AgenticRagScannerApi -- seed
+
+# Or scope to a single taxonomy
+dotnet run --project AgenticRagScannerApi -- seed tags
+dotnet run --project AgenticRagScannerApi -- seed impactareas
+```
+
+The `RegDocs` container is partitioned on `/doc_type` and is provisioned by the Bicep infrastructure;
+the keyless data-plane path does not create it, so provision infrastructure first. Each seeded document
+gets a fresh GUID id, so re-running adds a new set rather than overwriting the previous one.
 
 ### Infrastructure CLI tools
 
