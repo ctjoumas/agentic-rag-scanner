@@ -58,8 +58,8 @@ flowchart LR
     RE --> LC[LoopController]
     LC -->|Continue| QS
     LC -->|Finalize| VR[VerdictRouting]
-    VR --> EN[Enrichment]
-    EN --> CAT[Categorize]
+    VR --> EN[Enrichment - parked/optional]
+    EN --> CAT[Categorize - group-level Impact Area + Tags]
     CAT --> DV[Deloitte View - summary + view over full text]
     DV --> OUT([Yield TopicGroupResult])
 ```
