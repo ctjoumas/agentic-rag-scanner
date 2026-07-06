@@ -30,7 +30,7 @@ RunPassAsync (one pass):
   6. LoopController  (code/LLM)→ retry or finalize
 
 FinalizeAsync (once, on exit):
-  VerdictRouting → Enrichment → Categorize → Deloitte View   (Categorize per carried item; Deloitte View once per group, over full text)
+  VerdictRouting → Enrichment → Categorize → Deloitte View   (finalize tail; Deloitte View once per group, over full text)
 ```
 
 The executor was intentionally a **thin adapter** over `TopicGroupPipeline` — a deliberate choice so the loop was unit-testable as plain C# without standing up a workflow. (Both the executor and `TopicGroupPipeline` were removed in phase-7; the loop body now lives in the seven executors below, tested directly through the workflow — see [`TopicGroupWorkflowTests`](../tests/AgenticRagScannerApi.Tests/TopicGroupWorkflowTests.cs).)
@@ -145,7 +145,7 @@ When we decompose, the **loop body** (everything in `RunPassAsync`) becomes **si
 | 4 | `FetchAndCleanExecutor` | HTTP | `FilteredHitsResult` → `DocumentsResult` | sequential per hit today (fan-out/fan-in is a later step) |
 | 5 | `RelevanceEvalExecutor` | LLM (MAF agent) | `DocumentsResult` → `EvaluationResult` | full text + dates + history → per-item verdicts + the *raw* `ReviewDecision`; documents ride along in the message; no loop-control rules here |
 | 6 | `LoopControllerExecutor` | deterministic code | `EvaluationResult` → `Review` | **the branching node**: applies the `maxLoops` cap + ≥80% recall override to produce `Review.FinalDecision`, maps verdicts to vetted/discarded items (persists carried full text to blob); its `Review.FinalDecision` is checked by two conditional edges — `Retry` loops back to (1), `Finalize` exits to the finalize tail |
-| 7 | `FinalizeExecutor` | code | `Review` → yields `TopicGroupResult` | runs the existing sequential finalize tail (`VerdictRouting → Enrichment → Categorize → Deloitte View`; Categorize per item, Deloitte View once per group over each item's full text — one call producing both the summary and the view); reached **only** on the `Finalize` edge; terminal node, so it `YieldOutputAsync`es the result rather than emitting an edge message |
+| 7 | `FinalizeExecutor` | code | `Review` → yields `TopicGroupResult` | runs the existing sequential finalize tail (`VerdictRouting → Enrichment → Categorize → Deloitte View`; Categorize is group-level — one Impact Area + one Tags call over all the group's carried full text — and the Deloitte View runs once per group over each item's full text, one call producing both the summary and the view); reached **only** on the `Finalize` edge; terminal node, so it `YieldOutputAsync`es the result rather than emitting an edge message |
 
 **Scope note — finalize chain stays a tail.** The post-loop chain (`VerdictRouting → Enrichment → Categorize → Deloitte View`) is **out of scope** for this decomposition. On the Loop Controller executor's **Finalize** edge it remains the existing sequential tail (kept as a single `FinalizeExecutor` over today's `FinalizeAsync`). Splitting the finalize chain into per-step executors can follow later if per-item fan-out or per-step telemetry is wanted there too.
 
