@@ -54,10 +54,13 @@ Auditor Request (date + jurisdiction + topic groups)
                                       carried item's cleaned full text to blob for provenance; re-loop
                                       while under maxLoops if the goal is unmet or a pass is
                                       ≥80% RELEVANT (recall override — a rich vein implies more to find)
-        ── Routing & enrichment ──
-        7. Content Analysis / Enrichment   whatItDoes summary + metadata
-        8. Categorize Agent                impact area, regulator, approved tags
-        9. Summarize & Impact Agent        plain-English summary + effective date
+        ── Finalize (per group, after the loop) ──
+        7. Enrichment (parked/optional)  per-item whatItDoes summary + metadata
+        8. Categorize (group-level)      one Impact Area (single-label) + one Tags (multi-label)
+                                         LLM call, each over ALL the group's carried full text
+        9. Deloitte View Agent           one aggregate record per group — a neutral Summary of
+                                         Update + practitioner Deloitte View in a single call,
+                                         with RAG over prior Deloitte Views by jurisdiction
    └─ Deterministic Quality Gates    schema validation, dedupe vs. store, level-of-authority
    └─ Result Docs → Cosmos DB        one versioned doc per item per run
 ```
@@ -96,11 +99,11 @@ For full design details see [docs/horizon-scanner-architecture.md](docs/horizon-
 
 | Service | Role | Status |
 |---------|------|--------|
-| **Microsoft Foundry** (+ model deployment) | Hosts the models behind every LLM call (query synthesis, relevance eval, categorize, summarize). | Required |
+| **Microsoft Foundry** (+ model deployment) | Hosts the models behind every LLM call (query synthesis, relevance eval, group-level impact area + tags, and the aggregate Deloitte View / summary). | Required |
 | **Grounding with Bing Custom Search** (Foundry connection) | Web search for the Web Search agent, scoped to the primary-source allowlist. | Required |
 | **Azure Cosmos DB** | Versioned result documents (one per item per run), reference-data taxonomies (tags, impact areas), and MAF workflow checkpointing. | Required |
 | **Azure Storage account** (Blob) | Storage for fetched documents, exports, and working artifacts. | Required |
-| **Azure AI Search** | Memory/learnings store (planned/future feature #8). | Optional / Planned |
+| **Azure AI Search** | Memory/learnings store (planned/future — the memory & review loop). | Optional / Planned |
 | **Application Insights** | Structured logging + telemetry sink (via Serilog). | Optional |
 
 Authentication is **keyless by default** using `DefaultAzureCredential` (Managed Identity / developer
@@ -296,15 +299,18 @@ dotnet test AgenticRagScannerApi.sln
 
 ## Project status
 
-The solution is delivered in phased epics tracked in [docs/backlog.md](docs/backlog.md). Epics 0–6 are
+The solution is delivered in phased epics tracked in [docs/backlog.md](docs/backlog.md). Epics 0–8 are
 complete — foundations & contracts, run lifecycle, MAF scaffolding, the first real Foundry agent, the
-Web Search agent, full-text fetch & clean with blob storage, and the **date-aware, three-verdict
+Web Search agent, full-text fetch & clean with blob storage, the **date-aware, three-verdict
 relevance evaluation with the real loop controller** (per-item verdict routing, full-text provenance
-snapshots, a ≥80%-RELEVANT recall override, and a loop-feedback steer back into query synthesis).
-The per-group loop has since been decomposed from a single self-looping executor into a
-**seven-executor MAF graph** with mid-pass checkpoint resume — see
-[docs/maf-executor-design.md](docs/maf-executor-design.md).
-Later epics cover enrichment & categorization, quality gates + Cosmos persistence, publish/export,
+snapshots, a ≥80%-RELEVANT recall override, and a loop-feedback steer back into query synthesis), the
+decomposition of the per-group loop into a **seven-executor MAF graph** with mid-pass checkpoint
+resume (see [docs/maf-executor-design.md](docs/maf-executor-design.md)), and the **finalize chain** —
+**group-level categorization** (one Impact Area + one Tags call over all of a group's carried full
+text) and an **aggregate Deloitte View** per topic group that produces both a neutral *Summary of
+Update* and the practitioner *Deloitte View* in a single call, via RAG over prior Deloitte Views by
+jurisdiction.
+Later epics cover the deterministic quality gates + Cosmos persistence, publish/export,
 and the future memory/review loop.
 
 ## License
