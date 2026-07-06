@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Retry;
+using System.Runtime.CompilerServices;
 
 namespace AgenticRagScannerApi.Tests;
 
@@ -192,10 +193,18 @@ public class WebSearchAgentTests
             ChatOptions? options = null,
             CancellationToken cancellationToken = default) => Task.FromResult(_response);
 
-        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
-            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            foreach (var update in _response.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+
+            await Task.CompletedTask;
+        }
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 
@@ -221,7 +230,23 @@ public class WebSearchAgentTests
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default) => Task.FromResult(NextResponseOrThrow());
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            foreach (var update in NextResponseOrThrow().ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+
+            await Task.CompletedTask;
+        }
+
+        /// <summary>Counts one attempt, throwing a transient error until <c>failures</c> is exhausted.</summary>
+        private ChatResponse NextResponseOrThrow()
         {
             Attempts++;
             if (Attempts <= _failures)
@@ -229,13 +254,8 @@ public class WebSearchAgentTests
                 throw new HttpRequestException("transient");
             }
 
-            return Task.FromResult(_success);
+            return _success;
         }
-
-        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-            IEnumerable<ChatMessage> messages,
-            ChatOptions? options = null,
-            CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 

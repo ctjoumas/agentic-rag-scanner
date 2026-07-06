@@ -50,12 +50,20 @@ public sealed class WebSearchAgent : IWebSearchAgent
 
         try
         {
-            // Retry transient failures (with a per-attempt timeout) and funnel each attempt through the
-            // shared throttle so N parallel topic groups respect Bing QPS. Pipeline outer, throttle inner
-            // mirrors ResilientChatClient so a retried attempt re-acquires a throttle permit.
+            // Stream the hosted agent's run rather than issuing one long synchronous "create response"
+            // call: a Bing-grounded run (model reasoning + web search + grounding) can exceed the
+            // service's synchronous-response window and come back as HTTP 408. Streaming keeps the
+            // connection producing incremental updates, which avoids that server-side timeout; the updates
+            // are then aggregated back into a single response so the citation extraction below is
+            // unchanged. Retry transient failures (with a per-attempt timeout) and funnel each attempt
+            // through the shared throttle so N parallel topic groups respect Bing QPS. Pipeline outer,
+            // throttle inner mirrors ResilientChatClient so a retried attempt re-acquires a throttle permit.
             var response = await _resilience.ExecuteAsync(
                 async ct => await _throttle.ExecuteAsync(
-                    t => _agent.RunAsync(query, cancellationToken: t),
+                    async t => await _agent
+                        .RunStreamingAsync(query, cancellationToken: t)
+                        .ToAgentResponseAsync(t)
+                        .ConfigureAwait(false),
                     permits: 1,
                     cancellationToken: ct).ConfigureAwait(false),
                 cancellationToken).ConfigureAwait(false);
