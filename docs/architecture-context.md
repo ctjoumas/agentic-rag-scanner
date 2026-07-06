@@ -69,7 +69,7 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
        └─ NOT_RELEVANT → dropped (logged for audit)
    12. Content Analysis / Enrichment   (whatItDoes summary; enrich metadata)
    13. Categorize Agent (Stage 2)      (impact area; regulator; approved tags)
-   14. Summarize & Impact Agent (St.3) (RAG over history; effective date; plain-English)
+   14. Deloitte View & Summary Agent (St.3) (one per-group record from full text: neutral summary + Deloitte View; prior views by jurisdiction steer the view only)
 15. Deterministic Quality Gates  (schema validation; dedupe vs Cosmos; level-of-authority
                                   stamping: legislation > court ruling > HMRC guidance)
 16. Result Docs — Cosmos DB      (one versioned doc per item per run)
@@ -109,7 +109,7 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
 
 | Service | Role | Status |
 |---------|------|--------|
-| **Microsoft Foundry** | Hosts the models used for all LLM calls (query synthesis, eval, categorize, summarize). | Core |
+| **Microsoft Foundry** | Hosts the models used for all LLM calls (query synthesis, eval, categorize, Deloitte View). | Core |
 | **Grounding with Bing Custom Search** (via a pre-provisioned Foundry Web Search agent) | Allowlist-scoped web search; the agent is created in the Foundry portal and referenced by name. | Core |
 | **Azure Storage account** | Blob/file storage for fetched documents, exports, working artifacts. | Core |
 | **Azure AI Search** | Leaning choice for the (FUTURE) memory/learnings store (#8). | Planned |

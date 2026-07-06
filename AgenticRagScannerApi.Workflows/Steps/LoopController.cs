@@ -37,7 +37,9 @@ public sealed class LoopController : ILoopController
 
         // Real loop policy (Epic 6, story 6.2):
         //  - The per-group maxLoops cap is the hard stop: at the cap we always finalize.
-        //  - Below the cap we honor the eval agent's judgement (goal met -> Finalize, goal unmet -> Retry)
+        //  - Below the cap we honor the eval agent's judgement (goal met -> Finalize, goal unmet -> Retry).
+        //    The eval already retries rather than finalizing when a pass's web search FAILED (an error
+        //    state, not a genuine empty result), so a broken search does not end the group early here.
         //    UNLESS the recall override fires: when the eval wants to finalize but the pass was >80%
         //    RELEVANT, a vein this rich suggests there is more primary-source material to find, so we
         //    override into another RETRY (still bounded by maxLoops) rather than risk missing it.

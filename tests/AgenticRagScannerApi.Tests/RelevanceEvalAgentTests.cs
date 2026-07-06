@@ -103,6 +103,29 @@ public class RelevanceEvalAgentTests
         chat.CallCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task EvaluateAsync_NoDocuments_SearchFailed_RetriesWithoutCallingModel()
+    {
+        var chat = new FakeChatClient("{}");
+        var agent = CreateAgent(chat);
+        var context = WorkflowTestFactory.CreateContext();
+        // The web-search step recorded an error state on the pass: zero docs here is a broken search, not
+        // a genuine empty result, so the eval must RETRY (continue) rather than finalize.
+        context.History.Passes.Add(new LoopPass
+        {
+            Pass = 1,
+            Query = "q",
+            SearchFailed = true,
+            SearchFailureReason = "Web search timed out.",
+        });
+
+        var decision = await agent.EvaluateAsync(context, []);
+
+        decision.Decision.Should().Be(LoopDecision.Retry);
+        decision.Items.Should().BeEmpty();
+        chat.CallCount.Should().Be(0);
+    }
+
     private static RelevanceEvalAgent CreateAgent(IChatClient chatClient) =>
         new(chatClient, NullLogger<RelevanceEvalAgent>.Instance);
 

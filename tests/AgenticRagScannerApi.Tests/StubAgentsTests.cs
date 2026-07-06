@@ -40,19 +40,18 @@ public class StubAgentsTests
     }
 
     [Fact]
-    public async Task EnrichCategorizeSummarize_PopulateTheirFields()
+    public async Task EnrichImpactAreaTags_PopulateTheirFields()
     {
         var context = WorkflowTestFactory.CreateContext();
         var item = WorkflowTestFactory.Item("https://gov.uk/a", Verdict.Relevant);
+        var fullText = new Dictionary<string, string?> { [item.Id] = "full text" };
 
         await new EnrichmentAgentStub(NullLogger<EnrichmentAgentStub>.Instance).EnrichAsync(item, context);
-        await new CategorizeAgentStub(NullLogger<CategorizeAgentStub>.Instance).CategorizeAsync(item);
-        await new SummarizeImpactAgentStub(NullLogger<SummarizeImpactAgentStub>.Instance).SummarizeAsync(item, context);
+        var impactArea = await new ImpactAreaAgentStub(NullLogger<ImpactAreaAgentStub>.Instance).SelectAsync([item], fullText, context);
+        var tags = await new TagsAgentStub(NullLogger<TagsAgentStub>.Instance).SelectAsync([item], fullText, context);
 
         item.WhatItDoes.Should().NotBeNullOrWhiteSpace();
-        item.ImpactArea.Should().NotBeNullOrWhiteSpace();
-        item.Regulator.Should().NotBeNullOrWhiteSpace();
-        item.Tags.Should().NotBeEmpty();
-        item.ImpactSummary.Should().NotBeNullOrWhiteSpace();
+        impactArea.Should().NotBeNullOrWhiteSpace();
+        tags.Should().NotBeEmpty();
     }
 }

@@ -99,7 +99,7 @@ flowchart TB
     ROUTE -- NOT_RELEVANT --> DROP["Drop — logged for audit"]
 
     CA --> CAT["13. Categorize Agent — Stage 2<br/>impact area · regulator · approved tags"]
-    CAT --> SUM["14. Summarize and Impact Agent — Stage 3<br/>RAG over history · effective date · plain-English"]
+    CAT --> SUM["14. Deloitte View & Summary Agent — Stage 3<br/>one per-group record from the vetted full text: neutral summary + Deloitte View<br/>RAG over prior Deloitte Views (by jurisdiction) steers the view only"]
   end
 
   SUM --> QG["15. Deterministic Quality Gates<br/>schema · dedupe vs DB · level-of-authority"]
@@ -139,7 +139,7 @@ flowchart TB
 | 11 | Verdict Routing (in-memory) | Not a separate service call — just the in-memory decision of what to send on to step 12 based on each item's verdict. **RELEVANT** and **BORDERLINE** are both carried forward into enrichment; BORDERLINE items are kept but **flagged in the internal data structure** (so they're visible/auditable downstream) rather than blocking on a human. **NOT_RELEVANT** is dropped (logged for audit). |
 | 12 | Content Analysis / Enrichment | Former Stage 1.5, now enrichment-only (whatItDoes, metadata) since relevance moved into the loop. |
 | 13 | Categorize Agent (Stage 2) | Impact area, regulator, approved tag selection. |
-| 14 | Summarize & Impact Agent (Stage 3) | RAG over history; plain-English summary; effective-date extraction. |
+| 14 | Deloitte View & Summary Agent (Stage 3) | One consolidated per-group record built from the vetted full text in a **single call**: a neutral summary of *what changed* AND the Deloitte View advice. RAG over prior Deloitte Views (retrieved by jurisdiction) steers the Deloitte View only; the summary uses no history. |
 | 15 | Deterministic Quality Gates | Non-LLM, code-only validation before persisting: confirms each result matches the expected output **schema** (required fields present/typed), **dedupes against items already in Cosmos** (don't store the same regulatory update twice across runs), and stamps a **level-of-authority** (e.g. legislation > court ruling > HMRC guidance) derived from the source domain. Bad/duplicate records are rejected here so only clean, deduped docs reach the store. |
 | 16 | Result Docs (Cosmos DB) | Saves each result item (per topic group / workflow) as its own document in Cosmos DB — one versioned doc per item per run — forming the durable record for export and the (future) review UI. |
 | 17 | Published Regulatory Update | Auto-published to Reg Advantage + CSV/Excel export. |

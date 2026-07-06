@@ -55,6 +55,27 @@ public sealed class RelevanceEvalAgent : IRelevanceEvalAgent
 
         if (documents.Count == 0)
         {
+            // Zero documents has two very different causes, distinguished by the error state the web-search
+            // step records on the current pass (SearchFailed):
+            //  - the web search FAILED this pass (transient error, e.g. a 408 timeout) -> this is an error
+            //    state, NOT a genuine empty result. We must not finalize on a broken search: RETRY so the
+            //    loop tries again (bounded by maxLoops in the loop controller) rather than ending early.
+            //  - the search genuinely ran and returned nothing -> a real empty result, so FINALIZE.
+            var currentPass = context.History.CurrentPass;
+            if (currentPass?.SearchFailed == true)
+            {
+                _logger.LogInformation(
+                    "RelevanceEval ({PromptVersion}) for group '{GroupId}', pass {Pass}: no documents because web search failed ({Reason}); retrying rather than finalizing on a broken search.",
+                    RelevanceEvalPrompt.Version, context.TopicGroup.Id, pass, currentPass.SearchFailureReason);
+
+                return new ReviewDecision
+                {
+                    ThoughtProcess = $"No documents were retrieved this pass because the web search failed ({currentPass.SearchFailureReason}). This is an error state, not an empty result - retrying rather than finalizing on a broken search.",
+                    Decision = LoopDecision.Retry,
+                    Items = [],
+                };
+            }
+
             _logger.LogInformation(
                 "RelevanceEval ({PromptVersion}) for group '{GroupId}', pass {Pass}: no documents to evaluate; finalizing.",
                 RelevanceEvalPrompt.Version, context.TopicGroup.Id, pass);

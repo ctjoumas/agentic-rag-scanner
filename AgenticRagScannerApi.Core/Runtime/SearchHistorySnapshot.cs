@@ -19,7 +19,9 @@ public sealed record LoopPassSnapshot(
     string Query,
     string? QueryRationale,
     List<SearchHit> Hits,
-    ReviewSnapshot? Review);
+    ReviewSnapshot? Review,
+    bool SearchFailed = false,
+    string? SearchFailureReason = null);
 
 /// <summary>Snapshot of one pass <see cref="Review"/>.</summary>
 public sealed record ReviewSnapshot(

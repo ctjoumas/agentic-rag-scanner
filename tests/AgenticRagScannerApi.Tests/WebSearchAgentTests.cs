@@ -59,7 +59,7 @@ public class WebSearchAgentTests
             Citation("https://www.gov.uk/a", "Title A"),
             Citation("https://legislation.gov.uk/b", "Title B"));
 
-        var hits = await NewSut(chatClient).SearchAsync("query", NewRun());
+        var hits = (await NewSut(chatClient).SearchAsync("query", NewRun())).Hits;
 
         hits.Should().HaveCount(2);
         hits[0].Url.Should().Be("https://www.gov.uk/a");
@@ -77,7 +77,7 @@ public class WebSearchAgentTests
             Citation("https://www.gov.uk/a"),
             Citation("https://www.gov.uk/a"));
 
-        var hits = await NewSut(chatClient).SearchAsync("query", NewRun());
+        var hits = (await NewSut(chatClient).SearchAsync("query", NewRun())).Hits;
 
         hits.Should().ContainSingle();
     }
@@ -90,7 +90,7 @@ public class WebSearchAgentTests
             Citation("https://www.gov.uk/b"),
             Citation("https://www.gov.uk/c"));
 
-        var hits = await NewSut(chatClient, NewOptions(maxResults: 2)).SearchAsync("query", NewRun());
+        var hits = (await NewSut(chatClient, NewOptions(maxResults: 2)).SearchAsync("query", NewRun())).Hits;
 
         hits.Should().HaveCount(2);
     }
@@ -102,7 +102,7 @@ public class WebSearchAgentTests
             Citation("https://www.gov.uk/a"),
             Citation("https://evil.example.com/b"));
 
-        var hits = await NewSut(chatClient).SearchAsync("query", NewRun(allowlist: ["www.gov.uk"]));
+        var hits = (await NewSut(chatClient).SearchAsync("query", NewRun(allowlist: ["www.gov.uk"]))).Hits;
 
         hits.Should().ContainSingle();
         hits[0].Domain.Should().Be("www.gov.uk");
@@ -115,7 +115,7 @@ public class WebSearchAgentTests
             Citation("ftp://www.gov.uk/a"),
             Citation("/relative/path"));
 
-        var hits = await NewSut(chatClient).SearchAsync("query", NewRun());
+        var hits = (await NewSut(chatClient).SearchAsync("query", NewRun())).Hits;
 
         hits.Should().BeEmpty();
     }
@@ -125,9 +125,25 @@ public class WebSearchAgentTests
     {
         var chatClient = ChatClientReturning(new TextContent("Just an answer, no sources."));
 
-        var hits = await NewSut(chatClient).SearchAsync("query", NewRun());
+        var result = await NewSut(chatClient).SearchAsync("query", NewRun());
 
-        hits.Should().BeEmpty();
+        // A search that ran and legitimately returned zero citations is empty but NOT a failure.
+        result.Hits.Should().BeEmpty();
+        result.Failed.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SearchAsync_ReturnsFailureWhenAgentThrows()
+    {
+        // The chat client always throws; with an empty resilience pipeline the single attempt is
+        // exhausted, so the agent degrades gracefully - no hits, but flagged as a failure.
+        var chatClient = new FlakyChatClient(failures: int.MaxValue, success: new ChatResponse(new ChatMessage(ChatRole.Assistant, [])));
+
+        var result = await NewSut(chatClient).SearchAsync("query", NewRun());
+
+        result.Hits.Should().BeEmpty();
+        result.Failed.Should().BeTrue();
+        result.FailureReason.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
@@ -156,7 +172,7 @@ public class WebSearchAgentTests
             retryOnce,
             NullLogger<WebSearchAgent>.Instance);
 
-        var hits = await sut.SearchAsync("query", NewRun());
+        var hits = (await sut.SearchAsync("query", NewRun())).Hits;
 
         chatClient.Attempts.Should().Be(2);
         hits.Should().ContainSingle();

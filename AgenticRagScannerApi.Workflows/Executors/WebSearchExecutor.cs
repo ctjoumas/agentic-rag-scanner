@@ -39,12 +39,25 @@ public sealed class WebSearchExecutor : Executor<QueryResult, HitsResult>
     /// </summary>
     public override async ValueTask<HitsResult> HandleAsync(QueryResult message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
-        var hits = await _agent.SearchAsync(message.Query, _context.Run, cancellationToken);
+        var result = await _agent.SearchAsync(message.Query, _context.Run, cancellationToken);
+
+        // Surface a genuine search failure (timeout/error) on the pass so a zero-result group caused by a
+        // broken search is not silently reported as a clean, completed empty scan. The pre-filter remains
+        // the sole writer of the pass's hits; here we only flag the failure.
+        if (result.Failed && _context.History.CurrentPass is { } pass)
+        {
+            pass.SearchFailed = true;
+            pass.SearchFailureReason = result.FailureReason;
+
+            _logger.LogWarning(
+                "Web search for group '{GroupId}' pass {Pass} failed: {Reason}",
+                _context.TopicGroup.Id, _context.LoopCount, result.FailureReason);
+        }
 
         _logger.LogDebug(
             "Web search for group '{GroupId}' pass {Pass}: '{Query}' returned {HitCount} hit(s).",
-            _context.TopicGroup.Id, _context.LoopCount, message.Query, hits.Count);
+            _context.TopicGroup.Id, _context.LoopCount, message.Query, result.Hits.Count);
 
-        return new HitsResult(hits);
+        return new HitsResult(result.Hits);
     }
 }

@@ -21,6 +21,16 @@ public sealed class LoopPass
     /// <summary>Hits returned by Bing for this pass (after the deterministic pre-filter).</summary>
     public List<SearchHit> Hits { get; } = [];
 
+    /// <summary>
+    /// True when this pass's web search <em>failed</em> (timeout/transport error after retries) rather
+    /// than genuinely returning no hits. Lets a zero-result pass caused by a broken search be surfaced
+    /// instead of silently reported as a clean, completed empty scan.
+    /// </summary>
+    public bool SearchFailed { get; set; }
+
+    /// <summary>Short, human-readable reason the web search failed; null unless <see cref="SearchFailed"/> is true.</summary>
+    public string? SearchFailureReason { get; set; }
+
     /// <summary>The review/eval outcome for this pass; null until the review step runs.</summary>
     public Review? Review { get; set; }
 }

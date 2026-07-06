@@ -44,7 +44,7 @@ public sealed class WebSearchAgent : IWebSearchAgent
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<SearchHit>> SearchAsync(string query, RunContext run, CancellationToken cancellationToken = default)
+    public async Task<WebSearchResult> SearchAsync(string query, RunContext run, CancellationToken cancellationToken = default)
     {
         var allowedHosts = BuildAllowedHosts(run.AuthoritativeSources);
 
@@ -117,7 +117,8 @@ public sealed class WebSearchAgent : IWebSearchAgent
                 "WebSearch: query '{Query}' -> {Count} hit(s) (allowlist size {AllowlistSize}).",
                 query, hits.Count, allowedHosts.Count);
 
-            return hits;
+            // A successful run - even one that legitimately returned zero citations - is NOT a failure.
+            return WebSearchResult.Ok(hits);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -127,27 +128,28 @@ public sealed class WebSearchAgent : IWebSearchAgent
         {
             // A cancellation whose token is NOT the caller's comes from the SDK network timeout
             // (AIProjectClient.NetworkTimeout). Treat it like any other failed search: log a concise
-            // warning and degrade gracefully rather than aborting the run.
+            // warning and degrade gracefully rather than aborting the run - but surface it as a failure
+            // so a zero-result group is not silently reported as a clean, completed empty scan.
             _logger.LogWarning(
                 ex,
                 "WebSearch: query '{Query}' was canceled by an SDK network timeout; returning no hits.",
                 query);
-            return [];
+            return WebSearchResult.Failure("Web search was canceled by an SDK network timeout.");
         }
         catch (TimeoutRejectedException)
         {
             // Expected, handled condition: the hosted agent didn't respond within the per-attempt
             // timeout. The loop controller proceeds without these hits, so log a concise warning
-            // (not the full transport stack trace) and degrade gracefully.
+            // (not the full transport stack trace) and degrade gracefully - surfaced as a failure.
             _logger.LogWarning(
                 "WebSearch: query '{Query}' timed out after the configured per-request timeout; returning no hits.",
                 query);
-            return [];
+            return WebSearchResult.Failure("Web search timed out after the configured per-request timeout.");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "WebSearch: agent run failed for query '{Query}'; returning no hits.", query);
-            return [];
+            return WebSearchResult.Failure($"Web search agent run failed: {ex.Message}");
         }
     }
 

@@ -3,8 +3,12 @@ using AgenticRagScannerApi.Seeding;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Optional local overrides (real secrets live here and are git-ignored).
-builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+// Optional local overrides (real secrets live here and are git-ignored). Anchored to the content root so
+// it loads regardless of the process working directory, and added last so it wins over appsettings.json
+// and appsettings.{Environment}.json. If a real endpoint is left as a placeholder here (or the file is
+// missing), the ValidateOnStart data-annotation checks in AddConfiguredOptions fail fast at startup.
+var localSettingsPath = Path.Combine(builder.Environment.ContentRootPath, "appsettings.Local.json");
+builder.Configuration.AddJsonFile(localSettingsPath, optional: true, reloadOnChange: true);
 
 WebApplicationBuilderExtensions.AddSerilogLogging(builder);
 

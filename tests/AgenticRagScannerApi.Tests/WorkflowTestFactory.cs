@@ -49,9 +49,11 @@ internal static class WorkflowTestFactory
     /// graph the host runs), draining the event stream and returning the yielded result plus the number
     /// of per-super-step checkpoints observed.
     /// </summary>
-    public static async Task<(TopicGroupResult Result, int Checkpoints)> RunToCompletionAsync(TopicGroupContext context)
+    public static async Task<(TopicGroupResult Result, int Checkpoints)> RunToCompletionAsync(
+        TopicGroupContext context,
+        IWebSearchAgent? webSearchAgent = null)
     {
-        var workflow = TopicGroupWorkflow.Build(context, CreateServiceProvider());
+        var workflow = TopicGroupWorkflow.Build(context, CreateServiceProvider(webSearchAgent));
         var checkpointManager = CheckpointManager.CreateInMemory();
 
         var run = await InProcessExecution.RunStreamingAsync(workflow, TopicGroupWorkflow.StartSignal, checkpointManager);
@@ -80,24 +82,26 @@ internal static class WorkflowTestFactory
     /// logging, so <see cref="TopicGroupWorkflow.Build"/> can resolve each executor's dependencies via
     /// <see cref="ActivatorUtilities"/> exactly as the host does.
     /// </summary>
-    public static IServiceProvider CreateServiceProvider()
+    public static IServiceProvider CreateServiceProvider(IWebSearchAgent? webSearchAgent = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
 
         services.AddSingleton<IQuerySynthesisAgent>(sp => new QuerySynthesisAgentStub(sp.GetRequiredService<ILogger<QuerySynthesisAgentStub>>()));
-        services.AddSingleton<IWebSearchAgent, FakeWebSearchAgent>();
+        services.AddSingleton(webSearchAgent ?? new FakeWebSearchAgent());
         services.AddSingleton<IPreFilterStep>(sp => new PreFilterStep(sp.GetRequiredService<ILogger<PreFilterStep>>()));
         services.AddSingleton<IFetchAndCleanStep>(sp => new FetchAndCleanStep(
             new StubHttpClientFactory(),
             Options.Create(new FetchOptions()),
             sp.GetRequiredService<ILogger<FetchAndCleanStep>>()));
         services.AddSingleton<IRelevanceEvalAgent>(sp => new RelevanceEvalAgentStub(sp.GetRequiredService<ILogger<RelevanceEvalAgentStub>>()));
-        services.AddSingleton<ILoopController>(sp => new LoopController(new StubFullTextStore(), sp.GetRequiredService<ILogger<LoopController>>()));
+        services.AddSingleton<IFullTextStore, StubFullTextStore>();
+        services.AddSingleton<ILoopController>(sp => new LoopController(sp.GetRequiredService<IFullTextStore>(), sp.GetRequiredService<ILogger<LoopController>>()));
         services.AddSingleton<IVerdictRouting>(sp => new VerdictRouting(sp.GetRequiredService<ILogger<VerdictRouting>>()));
         services.AddSingleton<IEnrichmentAgent>(sp => new EnrichmentAgentStub(sp.GetRequiredService<ILogger<EnrichmentAgentStub>>()));
-        services.AddSingleton<ICategorizeAgent>(sp => new CategorizeAgentStub(sp.GetRequiredService<ILogger<CategorizeAgentStub>>()));
-        services.AddSingleton<ISummarizeImpactAgent>(sp => new SummarizeImpactAgentStub(sp.GetRequiredService<ILogger<SummarizeImpactAgentStub>>()));
+        services.AddSingleton<IImpactAreaAgent>(sp => new ImpactAreaAgentStub(sp.GetRequiredService<ILogger<ImpactAreaAgentStub>>()));
+        services.AddSingleton<ITagsAgent>(sp => new TagsAgentStub(sp.GetRequiredService<ILogger<TagsAgentStub>>()));
+        services.AddSingleton<IDeloitteViewAgent>(sp => new DeloitteViewAgentStub(sp.GetRequiredService<ILogger<DeloitteViewAgentStub>>()));
 
         return services.BuildServiceProvider();
     }
@@ -154,7 +158,7 @@ internal sealed class FakeWebSearchAgent : IWebSearchAgent
 {
     private const string DefaultAllowlistHost = "www.gov.uk";
 
-    public Task<IReadOnlyList<SearchHit>> SearchAsync(string query, RunContext run, CancellationToken cancellationToken = default)
+    public Task<WebSearchResult> SearchAsync(string query, RunContext run, CancellationToken cancellationToken = default)
     {
         IReadOnlyList<string> allowlist = run.AuthoritativeSources.Count > 0
             ? run.AuthoritativeSources
@@ -181,8 +185,19 @@ internal sealed class FakeWebSearchAgent : IWebSearchAgent
             });
         }
 
-        return Task.FromResult<IReadOnlyList<SearchHit>>(hits);
+        return Task.FromResult(WebSearchResult.Ok(hits));
     }
+}
+
+/// <summary>
+/// An <see cref="IWebSearchAgent"/> test double whose search always fails (timeout/error), so the loop
+/// retrieves zero documents because the search never ran - the case that must surface as a Failed group
+/// rather than a clean, completed empty scan.
+/// </summary>
+internal sealed class FailingWebSearchAgent : IWebSearchAgent
+{
+    public Task<WebSearchResult> SearchAsync(string query, RunContext run, CancellationToken cancellationToken = default) =>
+        Task.FromResult(WebSearchResult.Failure("Web search timed out after the configured per-request timeout."));
 }
 
 /// <summary>
@@ -197,6 +212,12 @@ internal sealed class StubFullTextStore : IFullTextStore
     {
         Persisted.Add((runId, groupId, itemId, text));
         return Task.FromResult($"https://stub.blob.core.windows.net/documents/fulltext/{runId}/{groupId}/{itemId}.txt");
+    }
+
+    public Task<string?> ReadAsync(string runId, string groupId, string itemId, CancellationToken cancellationToken = default)
+    {
+        var match = Persisted.FirstOrDefault(p => p.RunId == runId && p.GroupId == groupId && p.ItemId == itemId);
+        return Task.FromResult<string?>(match.Text);
     }
 }
 
