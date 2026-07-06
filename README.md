@@ -72,6 +72,22 @@ execute the synthesized queries. A per-run, in-memory
 **search history** (`searchQueries[]`, `vettedResults[]`, `discardedResults[]`) feeds both query
 synthesis (to avoid redundant queries) and evaluation (to assess coverage).
 
+**Configuring the single Web Search Foundry agent.** The agent's definition lives in
+[infra/tools/AgenticRagScanner.DeployAgentCli/Configuration/bing-grounding-agent.yaml](infra/tools/AgenticRagScanner.DeployAgentCli/Configuration/bing-grounding-agent.yaml)
+and is (re)deployed by the `azd` post-provision hook. It is deliberately configured as a **lightweight,
+retrieval-only** agent — a small, fast model (`gpt-5.4-mini`) with **reasoning effort `none`**, carrying a
+single `web_search` (Grounding with Bing Custom Search) tool with `tool_choice: required` and instructions
+that restrict it to that tool. The reasoning: this agent only takes an already-synthesized query, invokes
+the Bing tool (which performs the actual retrieval server-side), and returns the citations — it makes no
+complex judgments, so it needs neither a large model nor reasoning overhead. A smaller, no-reasoning model
+minimizes latency and cost, and (critically) avoids the long agent-run durations that surface as
+**HTTP 408** timeouts on Bing-grounded runs. Result quality is preserved elsewhere: the Bing Custom Search
+domain allowlist plus the code's own allowlist/dedup/URL checks scope the sources, and every hit is
+independently vetted downstream by the Relevance Eval agent before it is categorized or written up. Heavier
+models and higher reasoning effort are reserved for the agents that make real decisions (relevance
+evaluation, the Deloitte View). On the client side the agent run is **streamed** (aggregated back into one
+response) and wrapped in a Polly retry + per-request timeout to further guard the synchronous-timeout path.
+
 Each per-group workflow is built as a **seven-executor MAF graph** (Query Synthesis → Web Search →
 Pre-filter → Fetch & Clean → Relevance Eval → Loop Controller → Finalize), where the Loop Controller
 branches on a conditional edge — `Retry` loops back to Query Synthesis for another pass, `Finalize`
