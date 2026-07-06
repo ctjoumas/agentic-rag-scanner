@@ -54,7 +54,7 @@ Auditor Request (date + jurisdiction + topic groups)
                                       carried item's cleaned full text to blob for provenance; re-loop
                                       while under maxLoops if the goal is unmet or a pass is
                                       ≥80% RELEVANT (recall override — a rich vein implies more to find)
-        ── Finalize (per group, after the loop) ──
+        ── Finalize executor (per group, after the loop) — steps 7–9 run inside this single executor ──
         7. Enrichment (parked/optional)  per-item whatItDoes summary + metadata
         8. Categorize (group-level)      one Impact Area (single-label) + one Tags (multi-label)
                                          LLM call, each over ALL the group's carried full text
