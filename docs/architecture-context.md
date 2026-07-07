@@ -53,7 +53,7 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
 3. MAF Workflow (per group, shared throttle)
    ── Agentic RAG Loop (Stage 1 merged with old Stage 1.5) ──
    4. Query Synthesis Agent      (focused query from keyword set; uses in-memory search
-                                  history to avoid redundant queries)
+                                  history to avoid redundant queries; scoped to as-of date)
    5. Web Search Agent (Foundry) (Grounding with Bing Custom Search; restricted to
                                   primary-source allowlist — gate at query time)
    6. Deterministic Pre-filter   (dedupe incl. cross-group; URL reachability/validity)
@@ -64,6 +64,7 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
    10. Sufficiency / Loop Controller
        └─ re-loop if under per-group maxLoops (default 3) AND goal unmet,
           OR override if a pass returns >80% RELEVANT
+       └─ discards items confidently published after the as-of date (out-of-window)
    11. Verdict Routing (in-memory)
        ├─ RELEVANT  → enrichment
        ├─ BORDERLINE (flagged, still carried forward) → enrichment
@@ -89,7 +90,8 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
   in compliance, false negatives are costlier than false positives, so don't pre-prune on summaries.
 - **Query Synthesis Agent**: number of queries is the agent's call (NOT hard-coded to 4). On
   re-runs it consults the in-memory search history to craft non-redundant queries that target
-  untested synonyms/gaps.
+  untested synonyms/gaps. The synthesized query is also **scoped to the request's as-of date**
+  (a soft steer toward content published on/before it; enforcement is the loop-controller cutoff).
 - **In-memory search history** (per topic group, per run, **not persisted**): a JSON object with
   `searchQueries[]`, `vettedResults[]`, `discardedResults[]`, appended each pass. Feeds query
   synthesis (avoid redundancy) and eval (coverage). Distinct from the planned cross-run Memory
@@ -99,9 +101,11 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
 - **Loop exit:** per-group tunable `maxLoops` (default 3); eval agent judges goal-satisfaction;
   accuracy override re-loops if a pass is >80% RELEVANT.
 - **Effective-date aware eval:** distinguishes **publication date** vs **effective/in-force date**
-  vs **tax-year/period applicability**; compares to the requested window; uses dates as a *signal*,
-  not a hard filter; carries dates forward. Output schema fields: `publicationDate`, `effectiveDate`,
-  `appliesFrom`/`appliesTo`, `dateConfidence`.
+  vs **tax-year/period applicability**; compares to the requested window. Effective date is a
+  *signal* (not a hard filter), **but** the loop controller **hard-filters on publication date**:
+  items confidently published **after** the request's as-of date are discarded as out-of-window
+  (undated/low-confidence items and future *effective* dates are kept). Dates are carried forward.
+  Output schema fields: `publicationDate`, `effectiveDate`, `appliesFrom`/`appliesTo`, `dateConfidence`.
 - **Quality gates (#15)** are non-LLM: schema validation + dedupe vs Cosmos + level-of-authority stamping.
 - **Result store (#16):** one versioned Cosmos doc per item per run.
 

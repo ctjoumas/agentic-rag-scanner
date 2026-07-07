@@ -128,14 +128,14 @@ flowchart TB
 | 1 | Auditor Request | Entry point: date + jurisdiction (e.g., UK) + the topic groups to scan. |
 | 2 | Fan-out by Topic Group | Spawns one MAF workflow per topic group; they run in parallel. |
 | 3 | MAF Workflow (per group) | Self-contained run for one group; shares a throttle so parallel runs don't blow OpenAI TPM/RPM or Bing QPS limits. |
-| 4 | Query Synthesis Agent | Builds a focused query (or a small set) from the topic group's keyword/synonym set — count is the agent's call, not a fixed 4. On re-runs, uses the run's search history to craft a new, non-redundant query that targets untested synonyms or gaps. |
+| 4 | Query Synthesis Agent | Builds a focused query (or a small set) from the topic group's keyword/synonym set — count is the agent's call, not a fixed 4. On re-runs, uses the run's search history to craft a new, non-redundant query that targets untested synonyms or gaps. The query is also **scoped to the request's as-of date** — biased toward content published on/before that date. This is a *soft steer* expressed in the query text only (no date operators), since the hosted Bing tool ultimately reformulates the query. |
 | 5 | Web Search Agent (Foundry) | The pre-provisioned Foundry agent with the *Grounding with Bing Custom Search* tool executes the synthesized queries, constrained to the customer's primary-source domain allowlist (gate enforced here, not after). Configured lightweight — small model, reasoning `none` — since it only runs the tool and returns citations. |
 | 6 | Deterministic Pre-filter | Non-LLM: dedupe (incl. across topic groups) + URL reachability/validity, before any fetch. |
 | 7 | Full-text Fetch & Clean | Fetch HTML/PDF, strip boilerplate; if fetch fails, fall back to Bing summary and flag the item "unverified" rather than dropping it. |
 | 8 | Memory / Learnings store | **Planned.** Curated guidance rules (+ raw comments), scoped to jurisdiction + topic group, retrieved into the eval. |
 | — | Search History (this run) | *Not shown as a separate node — it's inherent to the loop.* Per-topic-group, **in-memory only** (not a queryable DB store) for the duration of the run — e.g. a JSON object with `searchQueries[]`, `vettedResults[]`, `discardedResults[]`, appended each pass. Feeds the query-synthesis agent (avoid redundant queries) and the eval agent (coverage assessment, skip duplicates). Distinct from the planned cross-run Memory/Learnings store (#8). A read-only **snapshot** of this history is (a) checkpointed for resumability and (b) **returned on the run result / API** (`TopicGroupResult.History`) so the future Admin UI (#18) can replay each pass — query, hits, verdicts, and the loop reasoning. |
 | 9 | Full-text Relevance Eval (single call) | The merged Stage 1 + 1.5 relevance decision on full text; effective-date aware; consumes injected learnings and the run's search history for coverage. One LLM eval per item. |
-| 10 | Sufficiency / Loop Controller | Continue if under per-group `maxLoops` (default 3, tunable per topic group) and goal unmet; exit when satisfied — **override**: re-loop if a pass is **≥80% RELEVANT** (boundary inclusive). |
+| 10 | Sufficiency / Loop Controller | Continue if under per-group `maxLoops` (default 3, tunable per topic group) and goal unmet; exit when satisfied — **override**: re-loop if a pass is **≥80% RELEVANT** (boundary inclusive). Also enforces the **as-of date cutoff**: any carried item the eval confidently dates (`dateConfidence` Medium/High) as **published after** the request's as-of date is discarded (audit-only) as out-of-window, regardless of verdict. |
 | 11 | Verdict Routing (in-memory) | Not a separate service call — just the in-memory decision of what to send on to step 12 based on each item's verdict. **RELEVANT** and **BORDERLINE** are both carried forward into enrichment; BORDERLINE items are kept but **flagged in the internal data structure** (so they're visible/auditable downstream) rather than blocking on a human. **NOT_RELEVANT** is dropped (logged for audit). |
 | 12 | Content Analysis / Enrichment | Former Stage 1.5, now enrichment-only (whatItDoes, metadata) since relevance moved into the loop. **Parked / optional** — retained but unscheduled (customer does not currently need it). |
 | 13 | Categorize (Stage 2) — **group-level** | Two separate LLM calls **per topic group** (not per item): one picks a single **Impact Area** (single-label, closed vocabulary), one selects **Tags** (multi-label), each grounded over **all** the group's carried full text. Results are set on the aggregate `DeloitteViewRecord`, not on individual items; vocabularies load from Cosmos RegDocs. **Regulator** is no longer a per-item categorize field — it's synthesized on the aggregate record in step 14. |
@@ -178,6 +178,14 @@ dates fall within (or bear on) the requested window.
 4. **Carry the dates forward.** Extracted dates are stored on the result doc and reused downstream
    (Stage 3 effective-date extraction, the export's effective-date column, and the audit trail), so
    the eval's date reasoning is transparent and reviewable.
+5. **As-of publication cutoff (hard gate, distinct from the soft signal above).** Separately from the
+   effective-date *signal*, the **loop controller** enforces the request's **as-of date** as an upper
+   bound on **publication** date: an item the eval confidently dates (`dateConfidence` Medium/High) as
+   *published after* the as-of date did not exist at the reference time, so it is discarded (audit-only)
+   regardless of verdict. Two deliberate boundaries: **undated / low-confidence** items are never dropped
+   on a date alone, and a **future *effective* date is not filtered** (an announced-but-not-yet-in-force
+   change published on/before the as-of date is a legitimate horizon item). The as-of date also *softly*
+   scopes query synthesis (step 4); this cutoff is the only place the date is *enforced*.
 
 This is implemented via the eval agent's prompt/instructions (what dates to find and how to weigh
 them) plus the structured output schema (explicit `publicationDate`, `effectiveDate`,
