@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgenticRagScannerApi.Core.Runtime;
@@ -42,7 +43,8 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
     public async Task<QuerySynthesisResult> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
     {
         var pass = context.LoopCount + 1;
-        var systemPrompt = QuerySynthesisPrompt.BuildSystemPrompt(context.Run.Jurisdiction);
+        var asOf = FormatAsOf(context);
+        var systemPrompt = QuerySynthesisPrompt.BuildSystemPrompt(context.Run.Jurisdiction, asOf);
         var userPrompt = QuerySynthesisPrompt.BuildUserPrompt(context);
 
         var agent = new ChatClientAgent(_chatClient, new ChatClientAgentOptions
@@ -61,8 +63,8 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
             if (result is not null)
             {
                 _logger.LogInformation(
-                    "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}: query synthesized on attempt {Attempt}.",
-                    QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass, attempt);
+                    "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}, as-of {AsOf}: synthesized '{Query}' on attempt {Attempt} ({Rationale}).",
+                    QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass, asOf, result.Query, attempt, result.Rationale ?? "no rationale");
                 return result;
             }
 
@@ -106,6 +108,14 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
             return null;
         }
     }
+
+    /// <summary>
+    /// The scan's reference ("as-of") date, formatted ISO. Falls back to the run's start date when the
+    /// request omitted it, mirroring the relevance-eval agent so both prompts share one anchor.
+    /// </summary>
+    private static string FormatAsOf(TopicGroupContext context) =>
+        context.Run.AsOfDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+        ?? context.Run.StartedAtUtc.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
     /// <summary>Deterministic single-query fallback derived from the topic group's keywords.</summary>
     private static QuerySynthesisResult BuildFallbackQuery(TopicGroupContext context)

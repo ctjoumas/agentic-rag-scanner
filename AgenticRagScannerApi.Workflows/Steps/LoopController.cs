@@ -2,6 +2,7 @@ using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
 using AgenticRagScannerApi.Workflows.Pipeline;
 using Microsoft.Extensions.Logging;
+using System.Globalization;
 
 namespace AgenticRagScannerApi.Workflows.Steps;
 
@@ -70,6 +71,15 @@ public sealed class LoopController : ILoopController
 
         var overridden = finalDecision != decision.Decision;
 
+        // The scan's as-of date is an upper-bound cutoff: an item published AFTER it did not exist at the
+        // reference time, so it is out of scope regardless of the eval verdict. We only apply this to items
+        // the eval carried forward, and only when the publication date is confidently after the cutoff -
+        // undated / low-confidence items are never dropped solely on a date, consistent with the eval
+        // philosophy. Future EFFECTIVE dates are legitimate horizon items and are deliberately NOT filtered.
+        var asOfCutoff = context.Run.AsOfDate
+            ?? DateOnly.FromDateTime(context.Run.StartedAtUtc.UtcDateTime);
+        var outOfWindow = 0;
+
         var review = new Review
         {
             ThoughtProcess = decision.ThoughtProcess,
@@ -94,6 +104,13 @@ public sealed class LoopController : ILoopController
                 // Discarded items are audit-only (never persisted to Cosmos), so we don't snapshot them.
                 review.Discarded.Add(item);
             }
+            else if (IsPublishedAfterAsOf(verdict, asOfCutoff))
+            {
+                // Out-of-window: confidently published after the as-of date. Discard (audit-only) rather
+                // than surface content that did not exist at the scan's reference time.
+                outOfWindow++;
+                review.Discarded.Add(item);
+            }
             else
             {
                 // Carried item: snapshot exactly what the eval read to blob for audit/provenance.
@@ -105,13 +122,24 @@ public sealed class LoopController : ILoopController
         pass.Review = review;
 
         _logger.LogInformation(
-            "Loop controller: group '{GroupId}' pass {Pass}/{MaxLoops} -> {Decision} (eval said {LlmDecision}; {RelevantShare:P0} relevant; vetted {Vetted}, discarded {Discarded}{Override}).",
+            "Loop controller: group '{GroupId}' pass {Pass}/{MaxLoops} -> {Decision} (eval said {LlmDecision}; {RelevantShare:P0} relevant; vetted {Vetted}, discarded {Discarded} (of which {OutOfWindow} after as-of {AsOf}){Override}).",
             context.TopicGroup.Id, pass.Pass, context.TopicGroup.MaxLoops, finalDecision, decision.Decision,
-            relevantShare, review.Vetted.Count, review.Discarded.Count,
+            relevantShare, review.Vetted.Count, review.Discarded.Count, outOfWindow, asOfCutoff.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             overridden ? $"; override: {overrideReason}" : string.Empty);
 
         return finalDecision;
     }
+
+    /// <summary>
+    /// True when the item was confidently published after the scan's as-of cutoff. Only a non-null
+    /// <see cref="ItemVerdict.PublicationDate"/> with <see cref="DateConfidence.Medium"/> or
+    /// <see cref="DateConfidence.High"/> confidence counts, so undated or low-confidence items are never
+    /// dropped on a date alone.
+    /// </summary>
+    private static bool IsPublishedAfterAsOf(ItemVerdict verdict, DateOnly asOfCutoff) =>
+        verdict.PublicationDate is { } published
+        && published > asOfCutoff
+        && verdict.DateConfidence is DateConfidence.Medium or DateConfidence.High;
 
     /// <summary>Share of the pass's evaluated items judged RELEVANT (0 when nothing was evaluated).</summary>
     private static double ComputeRelevantShare(IReadOnlyList<ItemVerdict> items)
