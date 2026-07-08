@@ -71,12 +71,14 @@ public sealed class LoopController : ILoopController
 
         var overridden = finalDecision != decision.Decision;
 
-        // The scan's as-of date is an upper-bound cutoff: an item published AFTER it did not exist at the
-        // reference time, so it is out of scope regardless of the eval verdict. We only apply this to items
-        // the eval carried forward, and only when the publication date is confidently after the cutoff -
-        // undated / low-confidence items are never dropped solely on a date, consistent with the eval
-        // philosophy. Future EFFECTIVE dates are legitimate horizon items and are deliberately NOT filtered.
-        var asOfCutoff = context.Run.AsOfDate
+        // The scan's date range is the in-scope window: an item confidently published BEFORE the start
+        // date or AFTER the end date is out of scope regardless of the eval verdict. We only apply this to
+        // items the eval carried forward, and only when the publication date is confidently outside the
+        // window - undated / low-confidence items are never dropped solely on a date, consistent with the
+        // eval philosophy. A null start date means no lower cutoff; a null end date falls back to the run's
+        // start date. Future EFFECTIVE dates are legitimate horizon items and are deliberately NOT filtered.
+        var lowerBound = context.Run.StartDate;
+        var upperBound = context.Run.EndDate
             ?? DateOnly.FromDateTime(context.Run.StartedAtUtc.UtcDateTime);
         var outOfWindow = 0;
 
@@ -104,10 +106,10 @@ public sealed class LoopController : ILoopController
                 // Discarded items are audit-only (never persisted to Cosmos), so we don't snapshot them.
                 review.Discarded.Add(item);
             }
-            else if (IsPublishedAfterAsOf(verdict, asOfCutoff))
+            else if (IsOutsideWindow(verdict, lowerBound, upperBound))
             {
-                // Out-of-window: confidently published after the as-of date. Discard (audit-only) rather
-                // than surface content that did not exist at the scan's reference time.
+                // Out-of-window: confidently published before the start date or after the end date.
+                // Discard (audit-only) rather than surface content outside the scan's requested range.
                 outOfWindow++;
                 review.Discarded.Add(item);
             }
@@ -122,24 +124,27 @@ public sealed class LoopController : ILoopController
         pass.Review = review;
 
         _logger.LogInformation(
-            "Loop controller: group '{GroupId}' pass {Pass}/{MaxLoops} -> {Decision} (eval said {LlmDecision}; {RelevantShare:P0} relevant; vetted {Vetted}, discarded {Discarded} (of which {OutOfWindow} after as-of {AsOf}){Override}).",
-            context.TopicGroup.Id, pass.Pass, context.TopicGroup.MaxLoops, finalDecision, decision.Decision,
-            relevantShare, review.Vetted.Count, review.Discarded.Count, outOfWindow, asOfCutoff.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            "Loop controller: group '{GroupId}' pass {Pass}/{MaxLoops} -> {Decision} (eval said {LlmDecision}; {RelevantShare:P0} relevant; vetted {Vetted}, discarded {Discarded} (of which {OutOfWindow} outside window {Start}..{End})){Override}).",
+            context.TopicGroup.Id, pass, context.TopicGroup.MaxLoops, finalDecision, decision.Decision,
+            relevantShare, review.Vetted.Count, review.Discarded.Count, outOfWindow,
+            lowerBound?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "-",
+            upperBound.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             overridden ? $"; override: {overrideReason}" : string.Empty);
 
         return finalDecision;
     }
 
     /// <summary>
-    /// True when the item was confidently published after the scan's as-of cutoff. Only a non-null
+    /// True when the item was confidently published outside the scan's date-range window - before
+    /// <paramref name="lowerBound"/> (when set) or after <paramref name="upperBound"/>. Only a non-null
     /// <see cref="ItemVerdict.PublicationDate"/> with <see cref="DateConfidence.Medium"/> or
     /// <see cref="DateConfidence.High"/> confidence counts, so undated or low-confidence items are never
     /// dropped on a date alone.
     /// </summary>
-    private static bool IsPublishedAfterAsOf(ItemVerdict verdict, DateOnly asOfCutoff) =>
+    private static bool IsOutsideWindow(ItemVerdict verdict, DateOnly? lowerBound, DateOnly upperBound) =>
         verdict.PublicationDate is { } published
-        && published > asOfCutoff
-        && verdict.DateConfidence is DateConfidence.Medium or DateConfidence.High;
+        && verdict.DateConfidence is DateConfidence.Medium or DateConfidence.High
+        && (published > upperBound || (lowerBound is { } start && published < start));
 
     /// <summary>Share of the pass's evaluated items judged RELEVANT (0 when nothing was evaluated).</summary>
     private static double ComputeRelevantShare(IReadOnlyList<ItemVerdict> items)

@@ -7,8 +7,11 @@ public class ScanRequestValidator : AbstractValidator<ScanRequest>
 {
     public ScanRequestValidator()
     {
-        RuleFor(x => x.AsOfDate)
-            .NotNull();
+        // Both dates are optional. When both are supplied, the window must be well-formed.
+        RuleFor(x => x.EndDate)
+            .GreaterThanOrEqualTo(x => x.StartDate!.Value)
+            .When(x => x.StartDate is not null && x.EndDate is not null)
+            .WithMessage("endDate must be on or after startDate.");
 
         RuleFor(x => x.Jurisdiction)
             .NotEmpty()

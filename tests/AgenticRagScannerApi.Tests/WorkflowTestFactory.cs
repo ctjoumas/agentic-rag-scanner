@@ -25,14 +25,16 @@ internal static class WorkflowTestFactory
         string name = "Tax",
         int maxLoops = 3,
         IReadOnlyList<string>? allowlist = null,
-        DateOnly? asOfDate = null)
+        DateOnly? startDate = null,
+        DateOnly? endDate = null)
     {
         var run = new RunContext
         {
             RunId = "run-1",
             Jurisdiction = "United Kingdom",
             AuthoritativeSources = allowlist ?? [],
-            AsOfDate = asOfDate,
+            StartDate = startDate,
+            EndDate = endDate,
         };
 
         var group = new TopicGroup

@@ -9,10 +9,18 @@ namespace AgenticRagScannerApi.Models;
 public class ScanRequest
 {
     /// <summary>
-    /// The scan reference date. Used later as the requested-window anchor by the
-    /// effective-date-aware relevance evaluation.
+    /// Inclusive lower bound of the scan window. Used together with <see cref="EndDate"/> to scope
+    /// search and the effective-date-aware relevance evaluation to a date range. When null, no lower
+    /// cutoff is applied.
     /// </summary>
-    public DateOnly? AsOfDate { get; set; }
+    public DateOnly? StartDate { get; set; }
+
+    /// <summary>
+    /// Inclusive upper bound of the scan window. Used together with <see cref="StartDate"/> to scope
+    /// search and the effective-date-aware relevance evaluation to a date range. When null, the run's
+    /// start date is used as the upper cutoff.
+    /// </summary>
+    public DateOnly? EndDate { get; set; }
 
     /// <summary>Jurisdiction to scan, e.g. "United Kingdom".</summary>
     public string Jurisdiction { get; set; } = string.Empty;

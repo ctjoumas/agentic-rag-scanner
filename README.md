@@ -296,7 +296,8 @@ POST https://localhost:7022/api/v1/scanner/scan
 Content-Type: application/json
 
 {
-  "asOfDate": "2026-04-06",
+  "startDate": "2026-01-01",
+  "endDate": "2026-04-06",
   "jurisdiction": "United Kingdom",
   "topicGroups": [ "Payroll Withholding", "Fringe Benefits" ]
 }

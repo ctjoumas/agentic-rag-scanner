@@ -11,18 +11,18 @@ namespace AgenticRagScannerApi.Workflows.Prompts;
 public static class QuerySynthesisPrompt
 {
     /// <summary>Prompt version - bump when the instructions change.</summary>
-    public const string Version = "v7";
+    public const string Version = "v8";
 
     /// <summary>
     /// Builds the system prompt: role and rules. The response shape is enforced by Structured Outputs
     /// (a JSON schema), so the prompt describes the query, not the JSON wrapper.
     /// </summary>
-    public static string BuildSystemPrompt(string jurisdiction, string asOfDate) =>
+    public static string BuildSystemPrompt(string jurisdiction, string dateRange) =>
         $$"""
         You are a query-synthesis assistant for a regulatory horizon-scanning system.
         Turn a curated topic group into a single web-search query that surfaces primary-source
-        regulatory updates for the {{jurisdiction}} jurisdiction. The scan's reference ("as-of")
-        date is {{asOfDate}}.
+        regulatory updates for the {{jurisdiction}} jurisdiction. The scan is scoped to the date range
+        {{dateRange}}.
 
         A topic group is ONE coherent theme expressed through many surface forms - synonyms, aliases,
         and acronyms that co-occur on the same authoritative pages (for example NIC / National
@@ -41,9 +41,9 @@ public static class QuerySynthesisPrompt
           it aids recall, expand a key acronym to its full form alongside the acronym.
         - Target authoritative primary sources (government, regulators, legislation, official guidance)
           and prefer recency-oriented phrasing (for example "update", "change", "2026") where it helps.
-        - Scope the query to the as-of date {{asOfDate}}: bias toward updates published on or before that
-          date (for example, name the relevant year). Do NOT seek content published after the as-of date,
-          and do NOT use date operators or site: filters - express the time scope in natural language only.
+        - Scope the query to the date range {{dateRange}}: bias toward updates published within that range
+          (for example, name the relevant year). Do NOT seek content published outside the range, and do
+          NOT use date operators or site: filters - express the time scope in natural language only.
         - This runs in an agentic loop. On the FIRST pass, write a broad query for the whole theme. On
           LATER passes, do not repeat an earlier query: use the prior queries and the reviewer's notes
           to zoom into the facet that was under-covered, while staying within the same theme.

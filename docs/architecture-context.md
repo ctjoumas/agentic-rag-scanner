@@ -28,7 +28,7 @@ Because this is public, MIT-licensed, and mirrors the customer's setup with *the
 
 Regulatory scanning for auditors.
 
-- **Input:** a **date** + **jurisdiction** (e.g., United Kingdom) + selected **topic groups**.
+- **Input:** a **date range** + **jurisdiction** (e.g., United Kingdom) + selected **topic groups**.
 - **Topic groups** are dense **OR-lists of keyword/synonym phrases** (acronyms/aliases). Example
   UK payroll/employment-tax groups: Payroll Withholding, Employer Payroll Taxes, Payroll Reporting,
   Fringe Benefits, Retirement Benefits, Equity and Incentives, Expatriates, Miscellaneous.
@@ -48,12 +48,12 @@ One **MAF workflow per topic group**, all running **in parallel**, sharing a thr
 respect Azure OpenAI TPM/RPM and Bing QPS limits.
 
 ```
-1. Auditor Request (date + jurisdiction + topic groups)
+1. Auditor Request (date range + jurisdiction + topic groups)
 2. Fan-out by Topic Group  → N parallel MAF workflows
 3. MAF Workflow (per group, shared throttle)
    ── Agentic RAG Loop (Stage 1 merged with old Stage 1.5) ──
    4. Query Synthesis Agent      (focused query from keyword set; uses in-memory search
-                                  history to avoid redundant queries; scoped to as-of date)
+                                  history to avoid redundant queries; scoped to date range)
    5. Web Search Agent (Foundry) (Grounding with Bing Custom Search; restricted to
                                   primary-source allowlist — gate at query time)
    6. Deterministic Pre-filter   (dedupe incl. cross-group; URL reachability/validity)
@@ -64,7 +64,7 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
    10. Sufficiency / Loop Controller
        └─ re-loop if under per-group maxLoops (default 3) AND goal unmet,
           OR override if a pass returns >80% RELEVANT
-       └─ discards items confidently published after the as-of date (out-of-window)
+       └─ discards items confidently published outside the start–end date range (out-of-window)
    11. Verdict Routing (in-memory)
        ├─ RELEVANT  → enrichment
        ├─ BORDERLINE (flagged, still carried forward) → enrichment
@@ -90,8 +90,8 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
   in compliance, false negatives are costlier than false positives, so don't pre-prune on summaries.
 - **Query Synthesis Agent**: number of queries is the agent's call (NOT hard-coded to 4). On
   re-runs it consults the in-memory search history to craft non-redundant queries that target
-  untested synonyms/gaps. The synthesized query is also **scoped to the request's as-of date**
-  (a soft steer toward content published on/before it; enforcement is the loop-controller cutoff).
+  untested synonyms/gaps. The synthesized query is also **scoped to the request's date range**
+  (a soft steer toward content published within it; enforcement is the loop-controller cutoff).
 - **In-memory search history** (per topic group, per run, **not persisted**): a JSON object with
   `searchQueries[]`, `vettedResults[]`, `discardedResults[]`, appended each pass. Feeds query
   synthesis (avoid redundancy) and eval (coverage). Distinct from the planned cross-run Memory
@@ -103,8 +103,9 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
 - **Effective-date aware eval:** distinguishes **publication date** vs **effective/in-force date**
   vs **tax-year/period applicability**; compares to the requested window. Effective date is a
   *signal* (not a hard filter), **but** the loop controller **hard-filters on publication date**:
-  items confidently published **after** the request's as-of date are discarded as out-of-window
-  (undated/low-confidence items and future *effective* dates are kept). Dates are carried forward.
+  items confidently published **before the start date or after the end date** are discarded as
+  out-of-window (undated/low-confidence items and future *effective* dates are kept). Dates are
+  carried forward.
   Output schema fields: `publicationDate`, `effectiveDate`, `appliesFrom`/`appliesTo`, `dateConfidence`.
 - **Quality gates (#15)** are non-LLM: schema validation + dedupe vs Cosmos + level-of-authority stamping.
 - **Result store (#16):** one versioned Cosmos doc per item per run.

@@ -22,10 +22,12 @@ public class ScanOrchestratorTests
             CreateCapturingExecutor(captured),
             Mock.Of<ILogger<ScanOrchestrator>>());
 
-        var asOfDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        var startDate = new DateOnly(2026, 1, 1);
+        var endDate = DateOnly.FromDateTime(DateTime.UtcNow);
         var request = new ScanRequest
         {
-            AsOfDate = asOfDate,
+            StartDate = startDate,
+            EndDate = endDate,
             Jurisdiction = "United Kingdom",
             TopicGroups = ["Tax", "Conduct", "Capital"],
         };
@@ -36,7 +38,8 @@ public class ScanOrchestratorTests
         captured.Should().OnlyContain(c => c.History.Passes.Count == 0);
         captured.Should().OnlyContain(c => c.Run.RunId == result.RunId);
         captured.Should().OnlyContain(c => c.Run.Jurisdiction == "United Kingdom");
-        captured.Should().OnlyContain(c => c.Run.AsOfDate == asOfDate);
+        captured.Should().OnlyContain(c => c.Run.StartDate == startDate);
+        captured.Should().OnlyContain(c => c.Run.EndDate == endDate);
         captured.Should().OnlyContain(c =>
             c.TopicGroup.Keywords.Count == 1 && c.TopicGroup.Keywords[0] == c.TopicGroup.Name);
     }
@@ -51,7 +54,7 @@ public class ScanOrchestratorTests
 
         var request = new ScanRequest
         {
-            AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow),
             Jurisdiction = "United Kingdom",
             TopicGroups = ["Tax", "Conduct", "Capital"],
         };
@@ -75,7 +78,7 @@ public class ScanOrchestratorTests
 
         var request = new ScanRequest
         {
-            AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow),
             Jurisdiction = "United Kingdom",
             // One topic group expressed as a comma-separated list: extra whitespace and a
             // case-insensitive duplicate ("Employee NIC") should be normalized away.

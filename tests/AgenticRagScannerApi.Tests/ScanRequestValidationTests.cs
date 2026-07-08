@@ -12,7 +12,8 @@ public class ScanRequestValidationTests
         var validator = new ScanRequestValidator();
         var request = new ScanRequest
         {
-            AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            StartDate = new DateOnly(2026, 1, 1),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow),
             Jurisdiction = "United Kingdom",
             TopicGroups = ["Financial Conduct", "AML Controls"],
         };
@@ -29,7 +30,7 @@ public class ScanRequestValidationTests
         var validator = new ScanRequestValidator();
         var request = new ScanRequest
         {
-            AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow),
             Jurisdiction = "United Kingdom",
             TopicGroups = [],
         };
@@ -46,7 +47,7 @@ public class ScanRequestValidationTests
         var validator = new ScanRequestValidator();
         var request = new ScanRequest
         {
-            AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow),
             Jurisdiction = "U",
             TopicGroups = ["Tax"],
         };

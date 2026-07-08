@@ -43,8 +43,8 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
     public async Task<QuerySynthesisResult> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
     {
         var pass = context.LoopCount + 1;
-        var asOf = FormatAsOf(context);
-        var systemPrompt = QuerySynthesisPrompt.BuildSystemPrompt(context.Run.Jurisdiction, asOf);
+        var window = FormatWindow(context);
+        var systemPrompt = QuerySynthesisPrompt.BuildSystemPrompt(context.Run.Jurisdiction, window);
         var userPrompt = QuerySynthesisPrompt.BuildUserPrompt(context);
 
         var agent = new ChatClientAgent(_chatClient, new ChatClientAgentOptions
@@ -63,8 +63,8 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
             if (result is not null)
             {
                 _logger.LogInformation(
-                    "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}, as-of {AsOf}: synthesized '{Query}' on attempt {Attempt} ({Rationale}).",
-                    QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass, asOf, result.Query, attempt, result.Rationale ?? "no rationale");
+                    "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}, window {Window}: synthesized '{Query}' on attempt {Attempt} ({Rationale}).",
+                    QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass, window, result.Query, attempt, result.Rationale ?? "no rationale");
                 return result;
             }
 
@@ -110,12 +110,19 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
     }
 
     /// <summary>
-    /// The scan's reference ("as-of") date, formatted ISO. Falls back to the run's start date when the
-    /// request omitted it, mirroring the relevance-eval agent so both prompts share one anchor.
+    /// The scan's date-range window, formatted for the prompt. A null end date falls back to the run's
+    /// start date; a null start date renders as an open lower bound. Mirrors the relevance-eval agent so
+    /// both prompts share one window description.
     /// </summary>
-    private static string FormatAsOf(TopicGroupContext context) =>
-        context.Run.AsOfDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
-        ?? context.Run.StartedAtUtc.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    private static string FormatWindow(TopicGroupContext context)
+    {
+        var end = context.Run.EndDate
+            ?? DateOnly.FromDateTime(context.Run.StartedAtUtc.UtcDateTime);
+        var endText = end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        return context.Run.StartDate is { } start
+            ? $"{start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} to {endText}"
+            : $"on or before {endText}";
+    }
 
     /// <summary>Deterministic single-query fallback derived from the topic group's keywords.</summary>
     private static QuerySynthesisResult BuildFallbackQuery(TopicGroupContext context)

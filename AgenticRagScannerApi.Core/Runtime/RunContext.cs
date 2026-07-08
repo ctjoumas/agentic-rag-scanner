@@ -13,8 +13,11 @@ public sealed class RunContext
     /// <summary>Jurisdiction being scanned (e.g. "United Kingdom").</summary>
     public required string Jurisdiction { get; init; }
 
-    /// <summary>Scan reference date / requested-window anchor.</summary>
-    public DateOnly? AsOfDate { get; init; }
+    /// <summary>Inclusive lower bound of the requested scan window (null = no lower cutoff).</summary>
+    public DateOnly? StartDate { get; init; }
+
+    /// <summary>Inclusive upper bound of the requested scan window (null = run start date is used).</summary>
+    public DateOnly? EndDate { get; init; }
 
     /// <summary>Primary-source domain allowlist that scopes Bing search at query time.</summary>
     public required IReadOnlyList<string> AuthoritativeSources { get; init; }

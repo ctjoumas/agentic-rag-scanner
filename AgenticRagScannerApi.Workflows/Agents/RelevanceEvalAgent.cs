@@ -91,7 +91,7 @@ public sealed class RelevanceEvalAgent : IRelevanceEvalAgent
         var systemPrompt = RelevanceEvalPrompt.BuildSystemPrompt(
             context.TopicGroup.Name,
             context.Run.Jurisdiction,
-            FormatAsOf(context));
+            FormatWindow(context));
         var userPrompt = RelevanceEvalPrompt.BuildUserPrompt(context, documents, MaxCharsPerDocument);
 
         var agent = new ChatClientAgent(_chatClient, new ChatClientAgentOptions
@@ -262,9 +262,15 @@ public sealed class RelevanceEvalAgent : IRelevanceEvalAgent
             : null;
     }
 
-    private static string FormatAsOf(TopicGroupContext context) =>
-        context.Run.AsOfDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
-        ?? context.Run.StartedAtUtc.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    private static string FormatWindow(TopicGroupContext context)
+    {
+        var end = context.Run.EndDate
+            ?? DateOnly.FromDateTime(context.Run.StartedAtUtc.UtcDateTime);
+        var endText = end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        return context.Run.StartDate is { } start
+            ? $"{start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} to {endText}"
+            : $"on or before {endText}";
+    }
 
     private sealed record EvalResult(
         [property: JsonPropertyName("thoughtProcess")] string? ThoughtProcess,
