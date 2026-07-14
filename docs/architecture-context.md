@@ -28,7 +28,7 @@ Because this is public, MIT-licensed, and mirrors the customer's setup with *the
 
 Regulatory scanning for auditors.
 
-- **Input:** a **date** + **jurisdiction** (e.g., United Kingdom) + selected **topic groups**.
+- **Input:** a **date range** + **jurisdiction** (e.g., United Kingdom) + selected **topic groups**.
 - **Topic groups** are dense **OR-lists of keyword/synonym phrases** (acronyms/aliases). Example
   UK payroll/employment-tax groups: Payroll Withholding, Employer Payroll Taxes, Payroll Reporting,
   Fringe Benefits, Retirement Benefits, Equity and Incentives, Expatriates, Miscellaneous.
@@ -48,13 +48,14 @@ One **MAF workflow per topic group**, all running **in parallel**, sharing a thr
 respect Azure OpenAI TPM/RPM and Bing QPS limits.
 
 ```
-1. Auditor Request (date + jurisdiction + topic groups)
+1. Auditor Request (date range + jurisdiction + topic groups)
 2. Fan-out by Topic Group  → N parallel MAF workflows
 3. MAF Workflow (per group, shared throttle)
    ── Agentic RAG Loop (Stage 1 merged with old Stage 1.5) ──
    4. Query Synthesis Agent      (focused query from keyword set; uses in-memory search
-                                  history to avoid redundant queries)
-   5. Bing Search (Azure)        (restricted to primary-source allowlist — gate at query time)
+                                  history to avoid redundant queries; scoped to date range)
+   5. Web Search Agent (Foundry) (Grounding with Bing Custom Search; restricted to
+                                  primary-source allowlist — gate at query time)
    6. Deterministic Pre-filter   (dedupe incl. cross-group; URL reachability/validity)
    7. Full-text Fetch & Clean    (HTML/PDF; strip boilerplate; fallback to Bing summary +
                                   flag "unverified" rather than dropping)
@@ -63,13 +64,15 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
    10. Sufficiency / Loop Controller
        └─ re-loop if under per-group maxLoops (default 3) AND goal unmet,
           OR override if a pass returns >80% RELEVANT
+       └─ discards items confidently published outside the start–end date range (out-of-window)
    11. Verdict Routing (in-memory)
        ├─ RELEVANT  → enrichment
        ├─ BORDERLINE (flagged, still carried forward) → enrichment
        └─ NOT_RELEVANT → dropped (logged for audit)
-   12. Content Analysis / Enrichment   (whatItDoes summary; enrich metadata)
-   13. Categorize Agent (Stage 2)      (impact area; regulator; approved tags)
-   14. Summarize & Impact Agent (St.3) (RAG over history; effective date; plain-English)
+   12. Content Analysis / Enrichment   (whatItDoes summary; enrich metadata — parked/optional)
+   13. Categorize (Stage 2, group-level) (one Impact Area + one Tags call over ALL the group's
+                                  full text → aggregate record; regulator now on the aggregate)
+   14. Company View & Summary Agent (St.3) (one per-group record from full text: neutral summary + Company View; prior views by jurisdiction steer the view only)
 15. Deterministic Quality Gates  (schema validation; dedupe vs Cosmos; level-of-authority
                                   stamping: legislation > court ruling > HMRC guidance)
 16. Result Docs — Cosmos DB      (one versioned doc per item per run)
@@ -87,7 +90,8 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
   in compliance, false negatives are costlier than false positives, so don't pre-prune on summaries.
 - **Query Synthesis Agent**: number of queries is the agent's call (NOT hard-coded to 4). On
   re-runs it consults the in-memory search history to craft non-redundant queries that target
-  untested synonyms/gaps.
+  untested synonyms/gaps. The synthesized query is also **scoped to the request's date range**
+  (a soft steer toward content published within it; enforcement is the loop-controller cutoff).
 - **In-memory search history** (per topic group, per run, **not persisted**): a JSON object with
   `searchQueries[]`, `vettedResults[]`, `discardedResults[]`, appended each pass. Feeds query
   synthesis (avoid redundancy) and eval (coverage). Distinct from the planned cross-run Memory
@@ -97,9 +101,12 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
 - **Loop exit:** per-group tunable `maxLoops` (default 3); eval agent judges goal-satisfaction;
   accuracy override re-loops if a pass is >80% RELEVANT.
 - **Effective-date aware eval:** distinguishes **publication date** vs **effective/in-force date**
-  vs **tax-year/period applicability**; compares to the requested window; uses dates as a *signal*,
-  not a hard filter; carries dates forward. Output schema fields: `publicationDate`, `effectiveDate`,
-  `appliesFrom`/`appliesTo`, `dateConfidence`.
+  vs **tax-year/period applicability**; compares to the requested window. Effective date is a
+  *signal* (not a hard filter), **but** the loop controller **hard-filters on publication date**:
+  items confidently published **before the start date or after the end date** are discarded as
+  out-of-window (undated/low-confidence items and future *effective* dates are kept). Dates are
+  carried forward.
+  Output schema fields: `publicationDate`, `effectiveDate`, `appliesFrom`/`appliesTo`, `dateConfidence`.
 - **Quality gates (#15)** are non-LLM: schema validation + dedupe vs Cosmos + level-of-authority stamping.
 - **Result store (#16):** one versioned Cosmos doc per item per run.
 
@@ -109,7 +116,7 @@ respect Azure OpenAI TPM/RPM and Bing QPS limits.
 
 | Service | Role | Status |
 |---------|------|--------|
-| **Microsoft Foundry** | Hosts the models used for all LLM calls (query synthesis, eval, categorize, summarize). | Core |
+| **Microsoft Foundry** | Hosts the models used for all LLM calls (query synthesis, eval, group-level impact area + tags, Company View). | Core |
 | **Grounding with Bing Custom Search** (via a pre-provisioned Foundry Web Search agent) | Allowlist-scoped web search; the agent is created in the Foundry portal and referenced by name. | Core |
 | **Azure Storage account** | Blob/file storage for fetched documents, exports, working artifacts. | Core |
 | **Azure AI Search** | Leaning choice for the (FUTURE) memory/learnings store (#8). | Planned |

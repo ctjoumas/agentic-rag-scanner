@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgenticRagScannerApi.Core.Runtime;
+using AgenticRagScannerApi.Workflows.Common;
 using AgenticRagScannerApi.Workflows.Configuration;
 using AgenticRagScannerApi.Workflows.Prompts;
 using Microsoft.Agents.AI;
@@ -42,7 +43,8 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
     public async Task<QuerySynthesisResult> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
     {
         var pass = context.LoopCount + 1;
-        var systemPrompt = QuerySynthesisPrompt.BuildSystemPrompt(context.Run.Jurisdiction);
+        var window = ScanDateRange.Format(context.Run);
+        var systemPrompt = QuerySynthesisPrompt.BuildSystemPrompt(context.Run.Jurisdiction, window);
         var userPrompt = QuerySynthesisPrompt.BuildUserPrompt(context);
 
         var agent = new ChatClientAgent(_chatClient, new ChatClientAgentOptions
@@ -61,8 +63,8 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
             if (result is not null)
             {
                 _logger.LogInformation(
-                    "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}: query synthesized on attempt {Attempt}.",
-                    QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass, attempt);
+                    "QuerySynthesis ({PromptVersion}) for group '{GroupId}', pass {Pass}, window {Window}: synthesized '{Query}' on attempt {Attempt} ({Rationale}).",
+                    QuerySynthesisPrompt.Version, context.TopicGroup.Id, pass, window, result.Query, attempt, result.Rationale ?? "no rationale");
                 return result;
             }
 

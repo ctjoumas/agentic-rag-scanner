@@ -30,7 +30,7 @@ RunPassAsync (one pass):
   6. LoopController  (code/LLM)→ retry or finalize
 
 FinalizeAsync (once, on exit):
-  VerdictRouting → Enrichment → Categorize → Summarize&Impact   (per carried item)
+  VerdictRouting → Enrichment → Categorize → Company View   (finalize tail; Company View once per group, over full text)
 ```
 
 The executor was intentionally a **thin adapter** over `TopicGroupPipeline` — a deliberate choice so the loop was unit-testable as plain C# without standing up a workflow. (Both the executor and `TopicGroupPipeline` were removed in phase-7; the loop body now lives in the seven executors below, tested directly through the workflow — see [`TopicGroupWorkflowTests`](../tests/AgenticRagScannerApi.Tests/TopicGroupWorkflowTests.cs).)
@@ -58,10 +58,10 @@ flowchart LR
     RE --> LC[LoopController]
     LC -->|Continue| QS
     LC -->|Finalize| VR[VerdictRouting]
-    VR --> EN[Enrichment]
-    EN --> CAT[Categorize]
-    CAT --> SUM[Summarize & Impact]
-    SUM --> OUT([Yield TopicGroupResult])
+    VR --> EN[Enrichment - parked/optional]
+    EN --> CAT[Categorize - group-level Impact Area + Tags]
+    CAT --> DV[Company View - summary + view over full text]
+    DV --> OUT([Yield TopicGroupResult])
 ```
 
 Here the loop-back ("re-synthesize on the next pass") is just an **edge** from `LoopController` back to `QuerySynthesis`, instead of a `PassSignal.Continue` self-message wrapping an internal pipeline.
@@ -145,9 +145,9 @@ When we decompose, the **loop body** (everything in `RunPassAsync`) becomes **si
 | 4 | `FetchAndCleanExecutor` | HTTP | `FilteredHitsResult` → `DocumentsResult` | sequential per hit today (fan-out/fan-in is a later step) |
 | 5 | `RelevanceEvalExecutor` | LLM (MAF agent) | `DocumentsResult` → `EvaluationResult` | full text + dates + history → per-item verdicts + the *raw* `ReviewDecision`; documents ride along in the message; no loop-control rules here |
 | 6 | `LoopControllerExecutor` | deterministic code | `EvaluationResult` → `Review` | **the branching node**: applies the `maxLoops` cap + ≥80% recall override to produce `Review.FinalDecision`, maps verdicts to vetted/discarded items (persists carried full text to blob); its `Review.FinalDecision` is checked by two conditional edges — `Retry` loops back to (1), `Finalize` exits to the finalize tail |
-| 7 | `FinalizeExecutor` | code | `Review` → yields `TopicGroupResult` | runs the existing sequential finalize tail (`VerdictRouting → Enrichment → Categorize → Summarize&Impact`); reached **only** on the `Finalize` edge; terminal node, so it `YieldOutputAsync`es the result rather than emitting an edge message |
+| 7 | `FinalizeExecutor` | code | `Review` → yields `TopicGroupResult` | runs the existing sequential finalize tail (`VerdictRouting → Enrichment → Categorize → Company View`; Categorize is group-level — one Impact Area + one Tags call over all the group's carried full text — and the Company View runs once per group over each item's full text, one call producing both the summary and the view); reached **only** on the `Finalize` edge; terminal node, so it `YieldOutputAsync`es the result rather than emitting an edge message |
 
-**Scope note — finalize chain stays a tail.** The post-loop chain (`VerdictRouting → Enrichment → Categorize → Summarize&Impact`) is **out of scope** for this decomposition. On the Loop Controller executor's **Finalize** edge it remains the existing sequential tail (kept as a single `FinalizeExecutor` over today's `FinalizeAsync`). Splitting the finalize chain into per-step executors can follow later if per-item fan-out or per-step telemetry is wanted there too.
+**Scope note — finalize chain stays a tail.** The post-loop chain (`VerdictRouting → Enrichment → Categorize → Company View`) is **out of scope** for this decomposition. On the Loop Controller executor's **Finalize** edge it remains the existing sequential tail (kept as a single `FinalizeExecutor` over today's `FinalizeAsync`). Splitting the finalize chain into per-step executors can follow later if per-item fan-out or per-step telemetry is wanted there too.
 
 **Why the branch lives on the Loop Controller response.** "Retry vs finalize" is a runtime routing decision that needs state a stateless edge predicate can't see: the pass count and `maxLoops` cap plus the ≥80% recall override. It also has side effects (mapping verdicts to vetted/discarded items and persisting carried full text to blob). MAF edge conditions are stateless `Func<object?, bool>` predicates over the source executor's *output message* only, so the decision logic must live in an executor and the "conditional" is the edges reading its output. We keep the existing `LoopController` as that executor: `RelevanceEvalExecutor` emits the raw `ReviewDecision` (wrapped in `EvaluationResult` alongside the documents), `LoopControllerExecutor` runs today's `ReviewPassAsync` (cap + override + item routing + blob persistence) and emits the existing `Review` carrying the final decision. In MAF a fork is **two outgoing conditional edges from one executor**, each guarded by a `condition: Func<T, bool>` predicate over its output: one loops back to `QuerySynthesisExecutor` (executor #1) when `Review.FinalDecision == Retry`, the other exits to `FinalizeExecutor` when `Review.FinalDecision == Finalize`. Keeping it a distinct node (rather than folding the rules into the eval step) preserves the existing separation of concerns and the unit-testable `ILoopController`.
 

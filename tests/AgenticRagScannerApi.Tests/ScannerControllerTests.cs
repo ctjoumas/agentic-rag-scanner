@@ -27,7 +27,7 @@ public class ScannerControllerTests
         var controller = CreateController(validator.Object);
         var request = new ScanRequest
         {
-            AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow),
             Jurisdiction = string.Empty,
             TopicGroups = ["Tax"],
         };
@@ -43,7 +43,7 @@ public class ScannerControllerTests
     {
         var request = new ScanRequest
         {
-            AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow),
             Jurisdiction = "United Kingdom",
             TopicGroups = ["Tax", "Conduct"],
         };

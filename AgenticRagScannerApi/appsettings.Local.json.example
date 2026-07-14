@@ -30,6 +30,7 @@
   "WebSearch": {
     "ProjectEndpoint": "https://<your-foundry-resource>.services.ai.azure.com/api/projects/<your-project>",
     "AgentName": "<your-web-search-agent-name>",
-    "MaxResults": 10
+    "MaxResults": 10,
+    "RequestTimeoutSeconds": 240
   }
 }

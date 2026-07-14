@@ -9,9 +9,11 @@ using AgenticRagScannerApi.Validators;
 using AgenticRagScannerApi.Workflows.Agents;
 using AgenticRagScannerApi.Workflows.Checkpointing;
 using AgenticRagScannerApi.Workflows.Configuration;
+using AgenticRagScannerApi.Workflows.CompanyView;
 using AgenticRagScannerApi.Workflows.Pipeline;
 using AgenticRagScannerApi.Workflows.Steps;
 using AgenticRagScannerApi.Workflows.Tools;
+using AgenticRagScannerApi.Workflows.Vocabulary;
 using Azure;
 using Azure.AI.OpenAI;
 using Azure.AI.Projects;
@@ -51,14 +53,19 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddConfiguredOptions(this IServiceCollection services, IConfiguration configuration)
     {
-        // Configuration (Options pattern) — bind each service's settings section.
-        services.AddOptions<AzureStorageOptions>().Bind(configuration.GetSection(AzureStorageOptions.SectionName)).ValidateDataAnnotations();
-        services.AddOptions<AzureSearchOptions>().Bind(configuration.GetSection(AzureSearchOptions.SectionName)).ValidateDataAnnotations();
-        services.AddOptions<FoundryOptions>().Bind(configuration.GetSection(FoundryOptions.SectionName)).ValidateDataAnnotations();
-        services.AddOptions<QuerySynthesisOptions>().Bind(configuration.GetSection(QuerySynthesisOptions.SectionName)).ValidateDataAnnotations();
-        services.AddOptions<CosmosOptions>().Bind(configuration.GetSection(CosmosOptions.SectionName)).ValidateDataAnnotations();
-        services.AddOptions<WebSearchOptions>().Bind(configuration.GetSection(WebSearchOptions.SectionName)).ValidateDataAnnotations();
-        services.AddOptions<FetchOptions>().Bind(configuration.GetSection(FetchOptions.SectionName)).ValidateDataAnnotations();
+        // Configuration (Options pattern) — bind each service's settings section. ValidateOnStart forces
+        // data-annotation validation at application startup (fail fast) instead of lazily on first use,
+        // so a misconfigured section (e.g. a placeholder ProjectEndpoint left in appsettings.json because
+        // appsettings.Local.json was not loaded) surfaces immediately at boot with the offending field.
+        services.AddOptions<AzureStorageOptions>().Bind(configuration.GetSection(AzureStorageOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<AzureSearchOptions>().Bind(configuration.GetSection(AzureSearchOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<FoundryOptions>().Bind(configuration.GetSection(FoundryOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<QuerySynthesisOptions>().Bind(configuration.GetSection(QuerySynthesisOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<CompanyViewOptions>().Bind(configuration.GetSection(CompanyViewOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<CosmosOptions>().Bind(configuration.GetSection(CosmosOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<WebSearchOptions>().Bind(configuration.GetSection(WebSearchOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<FetchOptions>().Bind(configuration.GetSection(FetchOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<RegulatoryUpdatesCsvOptions>().Bind(configuration.GetSection(RegulatoryUpdatesCsvOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
 
         return services;
     }
@@ -110,6 +117,15 @@ public static class ServiceCollectionExtensions
 
         // Generic Cosmos DB CRUD repository over the RegDocs container (reuses the CosmosClient singleton).
         services.AddSingleton(typeof(ICosmosRepository<>), typeof(CosmosRepository<>));
+
+        // Categorization vocabularies (impact areas + tags) read from Cosmos RegDocs at runtime (Epic 8,
+        // story 8.6). Singleton so the small, static vocabularies are loaded once and cached.
+        services.AddSingleton<IRegulatoryVocabularyProvider, CosmosVocabularyProvider>();
+
+        // Prior Company Views source for the Company View agent (Epic 8, story 8.5). CSV-backed for
+        // local testing (SQL in production, behind the same abstraction); singleton so the file is parsed
+        // once and cached.
+        services.AddSingleton<IPriorCompanyViewSource, CsvPriorCompanyViewSource>();
 
         // Shared throttle - Phase 0 pass-through; real TPM/RPM/QPS limits arrive later.
         services.AddSingleton<ISharedThrottle, NoOpThrottle>();
@@ -166,13 +182,14 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddWorkflowServices(this IServiceCollection services)
     {
-        // MAF workflow agents over the shared Foundry IChatClient. Query Synthesis (Epic 3) and
-        // Relevance Eval (Epic 6) are real; the remaining three stay stubs (no LLM calls) until Epic 7.
+        // MAF workflow agents over the shared Foundry IChatClient. Query Synthesis (Epic 3), Relevance
+        // Eval (Epic 6), Impact Area + Tags + Summary (Epic 8) are real; Enrichment stays a stub (parked).
         services.AddSingleton<IQuerySynthesisAgent, QuerySynthesisAgent>();
         services.AddSingleton<IRelevanceEvalAgent, RelevanceEvalAgent>();
         services.AddSingleton<IEnrichmentAgent, EnrichmentAgentStub>();
-        services.AddSingleton<ICategorizeAgent, CategorizeAgentStub>();
-        services.AddSingleton<ISummarizeImpactAgent, SummarizeImpactAgentStub>();
+        services.AddSingleton<IImpactAreaAgent, ImpactAreaAgent>();
+        services.AddSingleton<ITagsAgent, TagsAgent>();
+        services.AddSingleton<ICompanyViewAgent, CompanyViewAgent>();
 
         // Deterministic steps + the allowlist-gated web search agent (canned hits in Epic 2).
         services.AddSingleton<IPreFilterStep, PreFilterStep>();
@@ -265,9 +282,16 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Classifies an exception thrown by the hosted Web Search agent as transient (worth retrying).
-    /// Matches the transient surface used by <see cref="ResilientChatClient"/>: connection drops,
-    /// request timeouts, throttling (429), and server-side (5xx) failures.
+    /// Classifies an exception thrown by the hosted Web Search agent as transient (worth retrying):
+    /// connection drops (status 0), request timeouts (408), throttling (429), and server-side (5xx)
+    /// failures.
+    /// <para>
+    /// HTTP 408 is treated as transient (like <see cref="ResilientChatClient"/>). For a Bing-grounded
+    /// agent a 408 means the run did not finish in time, which is often intermittent (Bing latency
+    /// spikes, cold routing) rather than a permanent failure. The resilience pipeline retries with
+    /// exponential backoff + jitter and a per-attempt timeout, giving the search a reasonable window to
+    /// complete before the group is surfaced as Failed.
+    /// </para>
     /// </summary>
     private static bool IsTransientWebSearchFailure(Exception? exception) => exception switch
     {

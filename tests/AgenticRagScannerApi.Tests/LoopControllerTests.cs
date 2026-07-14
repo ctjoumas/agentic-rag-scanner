@@ -177,9 +177,159 @@ public class LoopControllerTests
         context.History.CurrentPass!.Review!.Vetted.Should().OnlyContain(item => item.FullTextBlobUri == null);
     }
 
-    private static TopicGroupContext ArrangeWithCurrentPass(int maxLoops, int priorPasses)
+    [Fact]
+    public async Task ReviewPass_DiscardsItemPublishedAfterEndDate_WhenDateIsConfident()
     {
-        var context = WorkflowTestFactory.CreateContext(maxLoops: maxLoops);
+        // The end date is the upper bound of the window; a doc confidently published after it is outside
+        // the requested range, so it is discarded (audit-only) and never snapshotted despite a RELEVANT verdict.
+        var context = ArrangeWithCurrentPass(maxLoops: 3, priorPasses: 0, endDate: new DateOnly(2026, 1, 1));
+        var store = new StubFullTextStore();
+        var controller = new LoopController(store, NullLogger<LoopController>.Instance);
+        var documents = new List<FetchedDocument> { WorkflowTestFactory.Doc("https://gov.uk/a") };
+        var decision = DatedDecision(new ItemVerdict
+        {
+            Index = 0,
+            Verdict = Verdict.Relevant,
+            PublicationDate = new DateOnly(2026, 6, 1),
+            DateConfidence = DateConfidence.High,
+        });
+
+        await controller.ReviewPassAsync(context, documents, decision);
+
+        var review = context.History.CurrentPass!.Review!;
+        review.Vetted.Should().BeEmpty();
+        review.Discarded.Should().HaveCount(1);
+        store.Persisted.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReviewPass_DiscardsItemPublishedBeforeStartDate_WhenDateIsConfident()
+    {
+        // The start date is the lower bound of the window; a doc confidently published before it is outside
+        // the requested range, so it is discarded (audit-only) despite a RELEVANT verdict.
+        var context = ArrangeWithCurrentPass(
+            maxLoops: 3, priorPasses: 0, startDate: new DateOnly(2026, 1, 1), endDate: new DateOnly(2026, 4, 6));
+        var store = new StubFullTextStore();
+        var controller = new LoopController(store, NullLogger<LoopController>.Instance);
+        var documents = new List<FetchedDocument> { WorkflowTestFactory.Doc("https://gov.uk/a") };
+        var decision = DatedDecision(new ItemVerdict
+        {
+            Index = 0,
+            Verdict = Verdict.Relevant,
+            PublicationDate = new DateOnly(2025, 12, 1),
+            DateConfidence = DateConfidence.High,
+        });
+
+        await controller.ReviewPassAsync(context, documents, decision);
+
+        var review = context.History.CurrentPass!.Review!;
+        review.Vetted.Should().BeEmpty();
+        review.Discarded.Should().HaveCount(1);
+        store.Persisted.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReviewPass_KeepsItemPublishedBeforeStartDate_WhenDateIsNotConfident()
+    {
+        // Low/Unknown date confidence never drops an item on a date alone, even below the start date.
+        var context = ArrangeWithCurrentPass(
+            maxLoops: 3, priorPasses: 0, startDate: new DateOnly(2026, 1, 1), endDate: new DateOnly(2026, 4, 6));
+        var controller = new LoopController(new StubFullTextStore(), NullLogger<LoopController>.Instance);
+        var documents = new List<FetchedDocument> { WorkflowTestFactory.Doc("https://gov.uk/a") };
+        var decision = DatedDecision(new ItemVerdict
+        {
+            Index = 0,
+            Verdict = Verdict.Relevant,
+            PublicationDate = new DateOnly(2025, 12, 1),
+            DateConfidence = DateConfidence.Low,
+        });
+
+        await controller.ReviewPassAsync(context, documents, decision);
+
+        var review = context.History.CurrentPass!.Review!;
+        review.Vetted.Should().HaveCount(1);
+        review.Discarded.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReviewPass_KeepsItemPublishedAfterEndDate_WhenDateIsNotConfident()
+    {
+        // Low/Unknown date confidence never drops an item on a date alone - consistent with the eval
+        // philosophy - so a maybe-future publication is still carried forward.
+        var context = ArrangeWithCurrentPass(maxLoops: 3, priorPasses: 0, endDate: new DateOnly(2026, 1, 1));
+        var controller = new LoopController(new StubFullTextStore(), NullLogger<LoopController>.Instance);
+        var documents = new List<FetchedDocument> { WorkflowTestFactory.Doc("https://gov.uk/a") };
+        var decision = DatedDecision(new ItemVerdict
+        {
+            Index = 0,
+            Verdict = Verdict.Relevant,
+            PublicationDate = new DateOnly(2026, 6, 1),
+            DateConfidence = DateConfidence.Low,
+        });
+
+        await controller.ReviewPassAsync(context, documents, decision);
+
+        var review = context.History.CurrentPass!.Review!;
+        review.Vetted.Should().HaveCount(1);
+        review.Discarded.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReviewPass_KeepsItemPublishedOnOrBeforeEndDate()
+    {
+        var context = ArrangeWithCurrentPass(maxLoops: 3, priorPasses: 0, endDate: new DateOnly(2026, 1, 1));
+        var controller = new LoopController(new StubFullTextStore(), NullLogger<LoopController>.Instance);
+        var documents = new List<FetchedDocument> { WorkflowTestFactory.Doc("https://gov.uk/a") };
+        var decision = DatedDecision(new ItemVerdict
+        {
+            Index = 0,
+            Verdict = Verdict.Relevant,
+            PublicationDate = new DateOnly(2025, 12, 1),
+            DateConfidence = DateConfidence.High,
+        });
+
+        await controller.ReviewPassAsync(context, documents, decision);
+
+        context.History.CurrentPass!.Review!.Vetted.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task ReviewPass_KeepsFutureEffectiveDate_WhenPublishedOnOrBeforeEndDate()
+    {
+        // A rule published before the end date but taking effect after it is a legitimate horizon item;
+        // only the PUBLICATION date is used for the window, so a future effective date is not filtered.
+        var context = ArrangeWithCurrentPass(maxLoops: 3, priorPasses: 0, endDate: new DateOnly(2026, 1, 1));
+        var controller = new LoopController(new StubFullTextStore(), NullLogger<LoopController>.Instance);
+        var documents = new List<FetchedDocument> { WorkflowTestFactory.Doc("https://gov.uk/a") };
+        var decision = DatedDecision(new ItemVerdict
+        {
+            Index = 0,
+            Verdict = Verdict.Relevant,
+            PublicationDate = new DateOnly(2025, 11, 1),
+            EffectiveDate = new DateOnly(2026, 4, 6),
+            DateConfidence = DateConfidence.High,
+        });
+
+        await controller.ReviewPassAsync(context, documents, decision);
+
+        context.History.CurrentPass!.Review!.Vetted.Should().HaveCount(1);
+    }
+
+    private static ReviewDecision DatedDecision(params ItemVerdict[] items) =>
+        new()
+        {
+            ThoughtProcess = "stub",
+            Decision = LoopDecision.Retry,
+            Items = items,
+        };
+
+    private static TopicGroupContext ArrangeWithCurrentPass(
+        int maxLoops,
+        int priorPasses,
+        DateOnly? startDate = null,
+        DateOnly? endDate = null)
+    {
+        var context = WorkflowTestFactory.CreateContext(maxLoops: maxLoops, startDate: startDate, endDate: endDate);
 
         for (var i = 0; i < priorPasses; i++)
         {

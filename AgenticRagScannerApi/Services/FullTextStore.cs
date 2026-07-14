@@ -31,4 +31,11 @@ public sealed class FullTextStore : IFullTextStore
 
         return uri.ToString();
     }
+
+    public Task<string?> ReadAsync(string runId, string groupId, string itemId, CancellationToken cancellationToken = default)
+    {
+        var blobName = $"fulltext/{runId}/{groupId}/{itemId}.txt";
+
+        return _storage.DownloadBlobTextAsync(_options.DocumentsContainer, blobName, cancellationToken);
+    }
 }

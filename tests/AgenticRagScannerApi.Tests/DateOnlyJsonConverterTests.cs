@@ -7,7 +7,7 @@ namespace AgenticRagScannerApi.Tests;
 
 /// <summary>
 /// The tolerant DateOnly converter accepts the canonical "yyyy-MM-dd" plus full ISO date-times
-/// (so clients sending a timestamp for asOfDate don't fail), preserves null, and writes "yyyy-MM-dd".
+/// (so clients sending a timestamp for startDate/endDate don't fail), preserves null, and writes "yyyy-MM-dd".
 /// </summary>
 public class DateOnlyJsonConverterTests
 {
@@ -18,25 +18,25 @@ public class DateOnlyJsonConverterTests
     [InlineData("2025-06-15T00:00:00Z")]
     [InlineData("2025-06-15T23:30:00+05:00")]
     [InlineData("2025-06-15T08:15:42")]
-    public void Deserialize_AcceptsDateAndDateTimeForms(string asOfDate)
+    public void Deserialize_AcceptsDateAndDateTimeForms(string startDate)
     {
-        var json = $$"""{"asOfDate":"{{asOfDate}}","jurisdiction":"United Kingdom","topicGroups":["Tax"]}""";
+        var json = $$"""{"startDate":"{{startDate}}","jurisdiction":"United Kingdom","topicGroups":["Tax"]}""";
 
         var request = JsonSerializer.Deserialize<ScanRequest>(json, Options);
 
         request.Should().NotBeNull();
-        request!.AsOfDate.Should().Be(new DateOnly(2025, 6, 15));
+        request!.StartDate.Should().Be(new DateOnly(2025, 6, 15));
     }
 
     [Fact]
-    public void Deserialize_PreservesNullAsOfDate()
+    public void Deserialize_PreservesNullStartDate()
     {
-        var json = """{"asOfDate":null,"jurisdiction":"United Kingdom","topicGroups":["Tax"]}""";
+        var json = """{"startDate":null,"jurisdiction":"United Kingdom","topicGroups":["Tax"]}""";
 
         var request = JsonSerializer.Deserialize<ScanRequest>(json, Options);
 
         request.Should().NotBeNull();
-        request!.AsOfDate.Should().BeNull();
+        request!.StartDate.Should().BeNull();
     }
 
     [Fact]

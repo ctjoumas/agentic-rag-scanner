@@ -1,3 +1,4 @@
+using Azure;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 
@@ -31,5 +32,22 @@ public class AzureStorageService : IAzureStorageService
         _logger.LogDebug("Uploaded blob '{BlobName}' to container '{Container}'.", blobName, containerName);
 
         return blob.Uri;
+    }
+
+    public async Task<string?> DownloadBlobTextAsync(string containerName, string blobName, CancellationToken cancellationToken = default)
+    {
+        var container = _blobServiceClient.GetBlobContainerClient(containerName);
+        var blob = container.GetBlobClient(blobName);
+
+        try
+        {
+            var response = await blob.DownloadContentAsync(cancellationToken);
+            return response.Value.Content.ToString();
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            _logger.LogDebug("Blob '{BlobName}' not found in container '{Container}'.", blobName, containerName);
+            return null;
+        }
     }
 }

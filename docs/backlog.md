@@ -171,6 +171,7 @@ synonyms / avoid redundancy; agent decides query count; structured output + boun
 - Implement the **Web Search agent** as a **pre-provisioned Foundry agent** (created in the Foundry portal with the **Grounding with Bing Custom Search** tool), **resolved by name** (optionally a pinned version) and run by the MAF workflow; it **executes the Query Synthesis agent's queries** and returns grounded hits/citations. The client-side adapter is `WebSearchAgent : IWebSearchAgent` over the MAF `AIAgent` abstraction — no tool/agent is constructed in code.
 - Scope the **Grounding with Bing Custom Search** instance to the **primary-source allowlist** so grounding is allowlist-restricted; verify hits/citations are limited to allowlisted domains.
 - Supersedes the standalone `IBingSearchGroundingService` / `IBingCustomSearchGroundingService` — grounding is owned by the Foundry agent's tool.
+- **Resilience:** the agent run is **streamed** (`RunStreamingAsync` aggregated back to one response) so a long Bing-grounded run avoids the synchronous-response **HTTP 408**; a Polly pipeline retries transient failures (status `0` / `408` / `429` / `5xx`) with exponential backoff + jitter and a per-attempt timeout, wrapped by the shared throttle; on exhaustion it **degrades gracefully** (logs, returns no hits) rather than aborting the run. Per-request timeout is `WebSearch:RequestTimeoutSeconds` (range `1–600`, default `240`), which drives the SDK `AIProjectClient.NetworkTimeout`.
 `labels: user-story, area:bing` · **depends on:** 2.4, 3.3 · *(merged: former 4.1 + 4.2)*
 
 ### 4.3 — Deterministic pre-filter (dedupe incl. cross-group + URL validity) · `lane:L3-data-platform`
@@ -283,7 +284,7 @@ rationale, and dates).
 **AC:**
 - The **loop body** is decomposed into **seven executors** wired in the frozen order: **(1) Query Synthesis → (2) Web Search → (3) Pre-filter → (4) Fetch & Clean → (5) Relevance Eval → (6) Loop Controller → (7) Finalize**.
 - The **branch is checked on the Loop Controller executor's response**: `Relevance Eval` emits the raw `ReviewDecision`; `LoopControllerExecutor` (today's `ILoopController.ReviewPassAsync`) applies the loop-control rules (per-group `maxLoops` cap, ≥80%-relevant override), maps verdicts to vetted/discarded items (persisting carried full text to blob), and emits the existing `Review` whose `FinalDecision` is a `LoopDecision` of `Retry` **or** `Finalize`. Two MAF conditional edges (`AddEdge(loopController, target, condition: …)`) route on `Review.FinalDecision`: **`Retry` loops back to Query Synthesis (executor #1)** for another pass, **`Finalize` exits the workflow** to the finalize tail. (We keep `LoopController` as a distinct node because the decision needs state a stateless edge predicate can't see — the pass count + cap — and has side effects; folding it into the eval step is rejected.)
-- The **finalize chain** (Verdict Routing → Enrichment → Categorize → Summarize&Impact) stays a sequential tail (single `FinalizeExecutor` over today's `FinalizeAsync`), reached only on the `Finalize` edge — splitting it is out of scope here.
+- The **finalize chain** (Verdict Routing → Enrichment → Categorize → Company View) stays a sequential tail (single `FinalizeExecutor` over today's `FinalizeAsync`), reached only on the `Finalize` edge — splitting it is out of scope here.
 - `SearchHistory` + per-step payloads (query, hits, filtered hits, documents, eval decision) checkpointed so a mid-pass failure resumes **after the last completed step**; per-pass `SearchHistory` checkpointing owned by the Loop Controller executor.
 - Fetch & Clean fan-out/fan-in across documents; per-step traces visible; existing pipeline tests pass (or are migrated).
 - Design + trade-offs in **`docs/maf-executor-design.md`**.
@@ -293,38 +294,38 @@ rationale, and dates).
 
 ---
 
-## Epic 8 — Enrichment + Categorize (Impact Area + Tags) + Summary + Deloitte View · `phase-8` · *L2-led*
-These agents run on each carried **regulatory update** **after** the Agentic RAG loop, using the topic group and the **vetted full-text documents** gathered during the loop.
+## ✅ Epic 8 — Enrichment + Categorize (Impact Area + Tags) + Summary + Company View · `phase-8` · *L2-led* · **Complete**
+The Company View and its objective fields are produced **per topic group after** the Agentic RAG loop, using the topic group and the **vetted full-text documents** gathered during the loop. **Categorization (Impact Area + Tags) is group-level:** each is a **single LLM call over ALL the group's carried updates' full text**, and the results are set on the aggregate `CompanyViewRecord` — **not** on individual `ResultItem`s. (Enrichment, if ever enabled, remains per item.)
 
 ### 8.1 — Enrichment Agent (parked / optional) · `lane:L2-agents`
 **AC:** `whatItDoes` summary + enriched metadata on carried items. **Parked** — customer does not currently need this; **retained but unscheduled**, do not drop pending customer confirmation.
 `labels: user-story, area:llm, status:parked` · **depends on:** 3.1, 6.2.
 
-### 8.2 — Impact Area Agent · `lane:L2-agents`
-**AC:** assign **one impact area** to the regulatory update from the **approved impact-area vocabulary** (single-label, closed set), using the topic group + the vetted full-text documents from the end of the loop. Vocabulary is **loaded from Cosmos at runtime** (RegDocs, `doc_type = "ImpactAreas"`) — not hardcoded.
+### 8.2 — Impact Area Agent (group-level) · `lane:L2-agents` · **✅ Done**
+**AC:** assign **one impact area** to the **topic group as a whole** from the **approved impact-area vocabulary** (single-label, closed set), in a **single call over ALL the group's carried updates' vetted full text** (not per item), using the topic group for context. The chosen area is set on the aggregate `CompanyViewRecord` (8.5), **not** on individual `ResultItem`s. Vocabulary is **loaded from Cosmos at runtime** (RegDocs, `doc_type = "ImpactAreas"`) — not hardcoded.
 **Impact areas (reference copy):** Administration of employment taxes withholding & payments · Employer tax reporting/filing requirements · Taxation of equity & incentives · Taxation of fringe benefits and employee expenses · International/expat tax arrangements · Employment taxes authority enforcement procedures · Employment taxes rates & thresholds · Employment taxes impact of termination/severance pay & benefits · Employment taxes updates related to state of emergency · Taxation of contractors and contingent labour · Governance and controls of employment taxes requirements.
 `labels: user-story, area:llm, area:cosmos` · **depends on:** 6.2, 8.6.
 
-### 8.3 — Tags Agent · `lane:L2-agents`
-**AC:** assign **one or more tags** from the **approved tag vocabulary** (multi-label). **Separate agent / LLM call** from 8.2 (one task per prompt; multi-label; independently tunable). Vocabulary is **loaded from Cosmos at runtime** (RegDocs, `doc_type = "tags"`) — not hardcoded.
+### 8.3 — Tags Agent (group-level) · `lane:L2-agents` · **✅ Done**
+**AC:** assign **one or more tags** for the **topic group as a whole** from the **approved tag vocabulary** (multi-label), in a **single call over ALL the group's carried updates' vetted full text** (not per item). **Separate agent / LLM call** from 8.2 (one task per prompt; multi-label; independently tunable). The selected tags are set on the aggregate `CompanyViewRecord` (8.5), **not** on individual `ResultItem`s. Vocabulary is **loaded from Cosmos at runtime** (RegDocs, `doc_type = "tags"`) — not hardcoded.
 **Tags (reference copy):** Payroll Reporting · National Insurance · Social Security · International Tax Treaties · Remote Work · PE · Expat tax regime · s.690 · Overseas Workday Relief · Company Cars · EVs · Benefits In Kind · ECOS · Class 2 NIC · CIS · Construction · Tax Authority Enforcement · Employee Benefits · Exemptions · Eye Tests · IR35 · Off Payroll · End Client · Remote Working · Home Exemption · Tax Return Deduction · Pensions · Salary Sacrifice · Fuel Rates · Income Tax.
 `labels: user-story, area:llm, area:cosmos` · **depends on:** 6.2, 8.6.
 
-### 8.4 — Summary Agent · `lane:L2-agents`
-**AC:** a **professional summarization** of the regulatory update found for the topic group.
+### 8.4 — Summary (merged into the Company View agent, 8.5) · `lane:L2-agents` · **✅ Done**
+**AC:** a **professional, neutral summarization** of the regulatory update(s) found for the topic group — *what changed* — grounded in the **vetted full text**. **There is no separate per-item summary agent:** this is produced by the **Company View agent (8.5)** in the **same single LLM call** that produces the Company View, as the record's `Summary of Update` field. The summary uses **no** historical Company Views (the prior-view exemplars steer the Company View only).
 `labels: user-story, area:llm` · **depends on:** 6.2.
 
-### 8.5 — Deloitte View Agent (RAG over prior views by jurisdiction) · `lane:L2-agents`
-**AC:** produce the **Deloitte View** (practitioner-style client advice) via RAG over prior Deloitte Views retrieved **by jurisdiction** (jurisdiction **from the scan request**). Local testing uses a **CSV** of historical views; production source is **SQL** (relational by jurisdiction) — SQL wiring deferred behind a retrieval abstraction.
+### 8.5 — Company View Agent (aggregate per topic group; RAG over prior views by jurisdiction) · `lane:L2-agents` · **✅ Done**
+**AC:** produce **one Company View per topic group** — a single record that **aggregates the group's carried regulatory updates** (grounded on their **vetted full text**, plus the **group-level** Impact Area and Tags from 8.2/8.3) and takes the **topic group** into account, via RAG over prior Company Views retrieved **by jurisdiction** (jurisdiction **from the scan request**). The output is a **structured record shaped to match the `RegulatoryUpdatesCsv` columns** (`CompanyViewRecord`: Jurisdiction · Impact Area · Tags · Title of Update · Summary of Update · Company View · Level of Authority · Status of Change · Announcement date · Effective Date of Change · Supporting reference · Regulator), surfaced on `TopicGroupResult` — **not** a per-item field. Objective fields are set deterministically — **jurisdiction** from the scan request, and **dates + supporting references** aggregated from the carried items — while **Impact Area + Tags come from the group-level 8.2/8.3 agents**; the judgement fields (title, **Summary of Update**, Company View, level of authority, status, regulator) are **synthesized by the model** in a **single Structured-Outputs call** over the carried items' **full text**. The **Summary of Update** is a neutral account of *what changed*, grounded only in the full text and using **no** prior views; the **Company View** is additionally steered (house style/tone) by the prior views retrieved by jurisdiction. It runs **once per group, after** the per-item enrichment and the group-level categorization; it grounds on each carried item's **vetted full text** (not a per-item summary). Local testing uses a **CSV** of historical records; production source is **SQL** (relational by jurisdiction) — SQL wiring deferred behind a retrieval abstraction.
 `labels: user-story, area:llm, area:data` · **depends on:** 8.4.
 
-### 8.6 — Load categorization vocabularies from Cosmos (RegDocs) · `lane:L2-agents`
+### 8.6 — Load categorization vocabularies from Cosmos (RegDocs) · `lane:L2-agents` · **✅ Done**
 **AC:** read the impact-area and tag vocabularies from Cosmos at runtime via `ICosmosRepository<T>` against the **RegDocs** container (partition key `/doc_type`); docs are `{ id, doc_type, name }`; query partition key `"ImpactAreas"` / `"tags"` and project `name`. Cosmos is the **single source of truth** — 8.2/8.3 consume this, no hardcoded lists. Vocabularies are **seeded** via `dotnet run -- seed` (`ImpactAreaSeeder` / `TagSeeder`, already on `main`); RegDocs container provisioned via IaC (`infra/modules/cosmos.bicep`).
 `labels: user-story, area:cosmos` · **depends on:** — *(`ICosmosRepository<T>` + RegDocs already merged to `main`)*.
 
-**Open items:** regulator field **struck** (confirm meaning with customer); add **jurisdiction** to the scan-request contract; CSV→SQL retrieval swap is a later task; the enumerated lists in 8.2/8.3 are the **reference copy** — the runtime source is **Cosmos RegDocs** (re-seed rather than edit prompts when the vocabulary changes).
+**Open items:** the **Regulator** field was **struck** from the per-item categorization (its meaning there was unclear — confirm with customer), but it is **reinstated on the aggregate `CompanyViewRecord`** so that record matches the `RegulatoryUpdatesCsv` shape (there the model synthesizes it); **jurisdiction** is on the scan-request contract (`ScanRequest.Jurisdiction`, flowed via `RunContext.Jurisdiction`) — **done**; CSV→SQL retrieval swap is a later task; the enumerated lists in 8.2/8.3 are the **reference copy** — the runtime source is **Cosmos RegDocs** (re-seed rather than edit prompts when the vocabulary changes).
 
-**Epic demo:** each carried update has an impact area, one+ tags, a professional Summary, and a Deloitte View grounded in prior jurisdiction-matched views (CSV locally); Enrichment remains parked.
+**Epic demo:** each carried update has an impact area and one+ tags; each **topic group** has one aggregate **Company View** record (shaped like `RegulatoryUpdatesCsv`) that carries **both** a neutral `Summary of Update` and the `Company View`, produced in a single call grounded in the vetted **full text** and prior jurisdiction-matched views (CSV locally); Enrichment remains parked.
 
 ---
 

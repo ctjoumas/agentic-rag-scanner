@@ -38,7 +38,9 @@ public static class SearchHistorySerializer
             pass.Query,
             pass.QueryRationale,
             [.. pass.Hits],
-            pass.Review is null ? null : ToReviewSnapshot(pass.Review));
+            pass.Review is null ? null : ToReviewSnapshot(pass.Review),
+            pass.SearchFailed,
+            pass.SearchFailureReason);
 
     private static LoopPass ToPass(LoopPassSnapshot snapshot)
     {
@@ -47,6 +49,8 @@ public static class SearchHistorySerializer
             Pass = snapshot.Pass,
             Query = snapshot.Query,
             QueryRationale = snapshot.QueryRationale,
+            SearchFailed = snapshot.SearchFailed,
+            SearchFailureReason = snapshot.SearchFailureReason,
         };
 
         pass.Hits.AddRange(snapshot.Hits);

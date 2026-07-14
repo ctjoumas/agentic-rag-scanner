@@ -54,10 +54,13 @@ Auditor Request (date + jurisdiction + topic groups)
                                       carried item's cleaned full text to blob for provenance; re-loop
                                       while under maxLoops if the goal is unmet or a pass is
                                       ≥80% RELEVANT (recall override — a rich vein implies more to find)
-        ── Routing & enrichment ──
-        7. Content Analysis / Enrichment   whatItDoes summary + metadata
-        8. Categorize Agent                impact area, regulator, approved tags
-        9. Summarize & Impact Agent        plain-English summary + effective date
+        ── Finalize executor (per group, after the loop) — steps 7–9 run inside this single executor ──
+        7. Enrichment (parked/optional)  per-item whatItDoes summary + metadata
+        8. Categorize (group-level)      one Impact Area (single-label) + one Tags (multi-label)
+                                         LLM call, each over ALL the group's carried full text
+        9. Company View Agent            one aggregate record per group — a neutral Summary of
+                                         Update + practitioner Company View in a single call,
+                                         with RAG over prior Company Views by jurisdiction
    └─ Deterministic Quality Gates    schema validation, dedupe vs. store, level-of-authority
    └─ Result Docs → Cosmos DB        one versioned doc per item per run
 ```
@@ -68,6 +71,22 @@ portal with *Grounding with Bing Custom Search*), which the MAF workflow resolve
 execute the synthesized queries. A per-run, in-memory
 **search history** (`searchQueries[]`, `vettedResults[]`, `discardedResults[]`) feeds both query
 synthesis (to avoid redundant queries) and evaluation (to assess coverage).
+
+**Configuring the single Web Search Foundry agent.** The agent's definition lives in
+[infra/tools/AgenticRagScanner.DeployAgentCli/Configuration/bing-grounding-agent.yaml](infra/tools/AgenticRagScanner.DeployAgentCli/Configuration/bing-grounding-agent.yaml)
+and is (re)deployed by the `azd` post-provision hook. It is deliberately configured as a **lightweight,
+retrieval-only** agent — a small, fast model (`gpt-5.4-mini`) with **reasoning effort `none`**, carrying a
+single `web_search` (Grounding with Bing Custom Search) tool with `tool_choice: required` and instructions
+that restrict it to that tool. The reasoning: this agent only takes an already-synthesized query, invokes
+the Bing tool (which performs the actual retrieval server-side), and returns the citations — it makes no
+complex judgments, so it needs neither a large model nor reasoning overhead. A smaller, no-reasoning model
+minimizes latency and cost, and (critically) avoids the long agent-run durations that surface as
+**HTTP 408** timeouts on Bing-grounded runs. Result quality is preserved elsewhere: the Bing Custom Search
+domain allowlist plus the code's own allowlist/dedup/URL checks scope the sources, and every hit is
+independently vetted downstream by the Relevance Eval agent before it is categorized or written up. Heavier
+models and higher reasoning effort are reserved for the agents that make real decisions (relevance
+evaluation, the Company View). On the client side the agent run is **streamed** (aggregated back into one
+response) and wrapped in a Polly retry + per-request timeout to further guard the synchronous-timeout path.
 
 Each per-group workflow is built as a **seven-executor MAF graph** (Query Synthesis → Web Search →
 Pre-filter → Fetch & Clean → Relevance Eval → Loop Controller → Finalize), where the Loop Controller
@@ -96,11 +115,11 @@ For full design details see [docs/horizon-scanner-architecture.md](docs/horizon-
 
 | Service | Role | Status |
 |---------|------|--------|
-| **Microsoft Foundry** (+ model deployment) | Hosts the models behind every LLM call (query synthesis, relevance eval, categorize, summarize). | Required |
+| **Microsoft Foundry** (+ model deployment) | Hosts the models behind every LLM call (query synthesis, relevance eval, group-level impact area + tags, and the aggregate Company View / summary). | Required |
 | **Grounding with Bing Custom Search** (Foundry connection) | Web search for the Web Search agent, scoped to the primary-source allowlist. | Required |
 | **Azure Cosmos DB** | Versioned result documents (one per item per run), reference-data taxonomies (tags, impact areas), and MAF workflow checkpointing. | Required |
 | **Azure Storage account** (Blob) | Storage for fetched documents, exports, and working artifacts. | Required |
-| **Azure AI Search** | Memory/learnings store (planned/future feature #8). | Optional / Planned |
+| **Azure AI Search** | Memory/learnings store (planned/future — the memory & review loop). | Optional / Planned |
 | **Application Insights** | Structured logging + telemetry sink (via Serilog). | Optional |
 
 Authentication is **keyless by default** using `DefaultAzureCredential` (Managed Identity / developer
@@ -277,7 +296,8 @@ POST https://localhost:7022/api/v1/scanner/scan
 Content-Type: application/json
 
 {
-  "asOfDate": "2026-04-06",
+  "startDate": "2026-01-01",
+  "endDate": "2026-04-06",
   "jurisdiction": "United Kingdom",
   "topicGroups": [ "Payroll Withholding", "Fringe Benefits" ]
 }
@@ -296,15 +316,18 @@ dotnet test AgenticRagScannerApi.sln
 
 ## Project status
 
-The solution is delivered in phased epics tracked in [docs/backlog.md](docs/backlog.md). Epics 0–6 are
+The solution is delivered in phased epics tracked in [docs/backlog.md](docs/backlog.md). Epics 0–8 are
 complete — foundations & contracts, run lifecycle, MAF scaffolding, the first real Foundry agent, the
-Web Search agent, full-text fetch & clean with blob storage, and the **date-aware, three-verdict
+Web Search agent, full-text fetch & clean with blob storage, the **date-aware, three-verdict
 relevance evaluation with the real loop controller** (per-item verdict routing, full-text provenance
-snapshots, a ≥80%-RELEVANT recall override, and a loop-feedback steer back into query synthesis).
-The per-group loop has since been decomposed from a single self-looping executor into a
-**seven-executor MAF graph** with mid-pass checkpoint resume — see
-[docs/maf-executor-design.md](docs/maf-executor-design.md).
-Later epics cover enrichment & categorization, quality gates + Cosmos persistence, publish/export,
+snapshots, a ≥80%-RELEVANT recall override, and a loop-feedback steer back into query synthesis), the
+decomposition of the per-group loop into a **seven-executor MAF graph** with mid-pass checkpoint
+resume (see [docs/maf-executor-design.md](docs/maf-executor-design.md)), and the **finalize chain** —
+**group-level categorization** (one Impact Area + one Tags call over all of a group's carried full
+text) and an **aggregate Company View** per topic group that produces both a neutral *Summary of
+Update* and the practitioner *Company View* in a single call, via RAG over prior Company Views by
+jurisdiction.
+Later epics cover the deterministic quality gates + Cosmos persistence, publish/export,
 and the future memory/review loop.
 
 ## License

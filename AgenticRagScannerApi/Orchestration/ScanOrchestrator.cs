@@ -32,7 +32,8 @@ public sealed class ScanOrchestrator : IScanOrchestrator
         {
             RunId = runId,
             Jurisdiction = request.Jurisdiction,
-            AsOfDate = request.AsOfDate,
+            StartDate = request.StartDate,
+            EndDate = request.EndDate,
             // The primary-source allowlist is enforced by the Web Search agent's Bing Custom Search
             // configuration (Epic 4). RunContext.AuthoritativeSources stays empty here; when populated it
             // adds a client-side, defense-in-depth host filter on top of that hosted scoping.
@@ -43,8 +44,8 @@ public sealed class ScanOrchestrator : IScanOrchestrator
         using var scope = _logger.BeginScope(new Dictionary<string, object> { ["runId"] = runId });
 
         _logger.LogInformation(
-            "Scan run starting: jurisdiction={Jurisdiction}, asOfDate={AsOfDate}, topicGroups={TopicGroupCount}.",
-            request.Jurisdiction, request.AsOfDate, request.TopicGroups.Count);
+            "Scan run starting: jurisdiction={Jurisdiction}, startDate={StartDate}, endDate={EndDate}, topicGroups={TopicGroupCount}.",
+            request.Jurisdiction, request.StartDate, request.EndDate, request.TopicGroups.Count);
 
         var contexts = MapToContexts(run, request.TopicGroups);
         var results = new List<TopicGroupResult>(contexts.Count);

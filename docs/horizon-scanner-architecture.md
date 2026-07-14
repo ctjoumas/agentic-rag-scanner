@@ -71,7 +71,7 @@
 ```mermaid
 flowchart TB
   %% ===== Inputs, governance, memory =====
-  A["1. Auditor Request<br/>date + jurisdiction + selected topic groups"]
+  A["1. Auditor Request<br/>date range + jurisdiction + selected topic groups"]
   GOV["Enterprise Controls<br/>security · model routing · audit · observability"]
   MEM[("8. Memory / Learnings store — PLANNED<br/>curated guidance rules + raw comments<br/>scoped to jurisdiction + topic group")]
 
@@ -83,7 +83,7 @@ flowchart TB
     subgraph LOOP["Agentic RAG Loop — Stage 1 merged with old Stage 1.5"]
       direction TB
       QR["4. Query Synthesis Agent<br/>builds a focused query from topic-group keyword set<br/>uses search history to avoid redundant queries"]
-      BING["5. Bing Search on Azure<br/>restricted to customer primary-source allowlist"]
+      BING["5. Web Search Agent (Foundry)<br/>Grounding with Bing Custom Search<br/>restricted to customer primary-source allowlist"]
       PF["6. Deterministic Pre-filter<br/>dedupe incl. cross-group · reachability/validity"]
       FT["7. Full-text Fetch and Clean<br/>HTML/PDF · strip boilerplate<br/>fallback to Bing summary and flag unverified"]
       EVAL["9. Full-text Relevance Eval Agent — single call<br/>RELEVANT / BORDERLINE / NOT_RELEVANT<br/>effective-date aware · applies retrieved learnings"]
@@ -98,8 +98,8 @@ flowchart TB
     ROUTE -- "BORDERLINE (flagged, still carried forward)" --> CA
     ROUTE -- NOT_RELEVANT --> DROP["Drop — logged for audit"]
 
-    CA --> CAT["13. Categorize Agent — Stage 2<br/>impact area · regulator · approved tags"]
-    CAT --> SUM["14. Summarize and Impact Agent — Stage 3<br/>RAG over history · effective date · plain-English"]
+    CA --> CAT["13. Categorize — Stage 2 (group-level)<br/>one Impact Area (single-label) + one Tags (multi-label) call<br/>over ALL the group's carried full text → aggregate record"]
+    CAT --> SUM["14. Company View & Summary Agent — Stage 3<br/>one per-group record from the vetted full text: neutral summary + Company View<br/>RAG over prior Company Views (by jurisdiction) steers the view only"]
   end
 
   SUM --> QG["15. Deterministic Quality Gates<br/>schema · dedupe vs DB · level-of-authority"]
@@ -125,21 +125,21 @@ flowchart TB
 
 | # | Step | What it does / why |
 |---|------|--------------------|
-| 1 | Auditor Request | Entry point: date + jurisdiction (e.g., UK) + the topic groups to scan. |
+| 1 | Auditor Request | Entry point: date range + jurisdiction (e.g., UK) + the topic groups to scan. |
 | 2 | Fan-out by Topic Group | Spawns one MAF workflow per topic group; they run in parallel. |
 | 3 | MAF Workflow (per group) | Self-contained run for one group; shares a throttle so parallel runs don't blow OpenAI TPM/RPM or Bing QPS limits. |
-| 4 | Query Synthesis Agent | Builds a focused query (or a small set) from the topic group's keyword/synonym set — count is the agent's call, not a fixed 4. On re-runs, uses the run's search history to craft a new, non-redundant query that targets untested synonyms or gaps. |
-| 5 | Bing Search (Azure) | Search constrained to the customer's primary-source domain allowlist (gate enforced here, not after). |
+| 4 | Query Synthesis Agent | Builds a focused query (or a small set) from the topic group's keyword/synonym set — count is the agent's call, not a fixed 4. On re-runs, uses the run's search history to craft a new, non-redundant query that targets untested synonyms or gaps. The query is also **scoped to the request's date range** — biased toward content published within that range. This is a *soft steer* expressed in the query text only (no date operators), since the hosted Bing tool ultimately reformulates the query. |
+| 5 | Web Search Agent (Foundry) | The pre-provisioned Foundry agent with the *Grounding with Bing Custom Search* tool executes the synthesized queries, constrained to the customer's primary-source domain allowlist (gate enforced here, not after). Configured lightweight — small model, reasoning `none` — since it only runs the tool and returns citations. |
 | 6 | Deterministic Pre-filter | Non-LLM: dedupe (incl. across topic groups) + URL reachability/validity, before any fetch. |
 | 7 | Full-text Fetch & Clean | Fetch HTML/PDF, strip boilerplate; if fetch fails, fall back to Bing summary and flag the item "unverified" rather than dropping it. |
 | 8 | Memory / Learnings store | **Planned.** Curated guidance rules (+ raw comments), scoped to jurisdiction + topic group, retrieved into the eval. |
 | — | Search History (this run) | *Not shown as a separate node — it's inherent to the loop.* Per-topic-group, **in-memory only** (not a queryable DB store) for the duration of the run — e.g. a JSON object with `searchQueries[]`, `vettedResults[]`, `discardedResults[]`, appended each pass. Feeds the query-synthesis agent (avoid redundant queries) and the eval agent (coverage assessment, skip duplicates). Distinct from the planned cross-run Memory/Learnings store (#8). A read-only **snapshot** of this history is (a) checkpointed for resumability and (b) **returned on the run result / API** (`TopicGroupResult.History`) so the future Admin UI (#18) can replay each pass — query, hits, verdicts, and the loop reasoning. |
 | 9 | Full-text Relevance Eval (single call) | The merged Stage 1 + 1.5 relevance decision on full text; effective-date aware; consumes injected learnings and the run's search history for coverage. One LLM eval per item. |
-| 10 | Sufficiency / Loop Controller | Continue if under per-group `maxLoops` (default 3, tunable per topic group) and goal unmet; exit when satisfied — **override**: re-loop if a pass is **≥80% RELEVANT** (boundary inclusive). |
+| 10 | Sufficiency / Loop Controller | Continue if under per-group `maxLoops` (default 3, tunable per topic group) and goal unmet; exit when satisfied — **override**: re-loop if a pass is **≥80% RELEVANT** (boundary inclusive). Also enforces the **date-range cutoff**: any carried item the eval confidently dates (`dateConfidence` Medium/High) as **published before the start date or after the end date** is discarded (audit-only) as out-of-window, regardless of verdict. |
 | 11 | Verdict Routing (in-memory) | Not a separate service call — just the in-memory decision of what to send on to step 12 based on each item's verdict. **RELEVANT** and **BORDERLINE** are both carried forward into enrichment; BORDERLINE items are kept but **flagged in the internal data structure** (so they're visible/auditable downstream) rather than blocking on a human. **NOT_RELEVANT** is dropped (logged for audit). |
-| 12 | Content Analysis / Enrichment | Former Stage 1.5, now enrichment-only (whatItDoes, metadata) since relevance moved into the loop. |
-| 13 | Categorize Agent (Stage 2) | Impact area, regulator, approved tag selection. |
-| 14 | Summarize & Impact Agent (Stage 3) | RAG over history; plain-English summary; effective-date extraction. |
+| 12 | Content Analysis / Enrichment | Former Stage 1.5, now enrichment-only (whatItDoes, metadata) since relevance moved into the loop. **Parked / optional** — retained but unscheduled (customer does not currently need it). |
+| 13 | Categorize (Stage 2) — **group-level** | Two separate LLM calls **per topic group** (not per item): one picks a single **Impact Area** (single-label, closed vocabulary), one selects **Tags** (multi-label), each grounded over **all** the group's carried full text. Results are set on the aggregate `CompanyViewRecord`, not on individual items; vocabularies load from Cosmos RegDocs. **Regulator** is no longer a per-item categorize field — it's synthesized on the aggregate record in step 14. |
+| 14 | Company View & Summary Agent (Stage 3) | One consolidated per-group record built from the vetted full text in a **single call**: a neutral summary of *what changed* AND the Company View advice. RAG over prior Company Views (retrieved by jurisdiction) steers the Company View only; the summary uses no history. |
 | 15 | Deterministic Quality Gates | Non-LLM, code-only validation before persisting: confirms each result matches the expected output **schema** (required fields present/typed), **dedupes against items already in Cosmos** (don't store the same regulatory update twice across runs), and stamps a **level-of-authority** (e.g. legislation > court ruling > HMRC guidance) derived from the source domain. Bad/duplicate records are rejected here so only clean, deduped docs reach the store. |
 | 16 | Result Docs (Cosmos DB) | Saves each result item (per topic group / workflow) as its own document in Cosmos DB — one versioned doc per item per run — forming the durable record for export and the (future) review UI. |
 | 17 | Published Regulatory Update | Auto-published to Reg Advantage + CSV/Excel export. |
@@ -156,7 +156,7 @@ Regulatory items carry **dates**, and not all dates mean the same thing:
   later than, publication; sometimes retroactive).
 - **Tax-year / period applicability** — e.g. "applies from 6 April 2026" (the UK tax-year boundary).
 
-The auditor's request is **scoped to a date** (e.g. "updates for the period around X"), so the eval
+The auditor's request is **scoped to a date range** (e.g. "updates published between X and Y"), so the eval
 agent shouldn't judge relevance on topic match alone — it must also reason about whether the item's
 dates fall within (or bear on) the requested window.
 
@@ -166,7 +166,7 @@ dates fall within (or bear on) the requested window.
    publication date, the effective/in-force date, and any "applies from / applies to" period,
    distinguishing them rather than grabbing the first date on the page.
 2. **Compare against the requested window.** The agent checks the extracted effective date (and
-   period applicability) against the auditor's selected date/range.
+   period applicability) against the auditor's selected date range.
 3. **Influence the verdict, don't hard-filter.** Effective date is a *signal*, not a deterministic
    gate — accuracy is paramount, so the agent should not silently drop an item solely because a
    date is just outside the window:
@@ -178,6 +178,14 @@ dates fall within (or bear on) the requested window.
 4. **Carry the dates forward.** Extracted dates are stored on the result doc and reused downstream
    (Stage 3 effective-date extraction, the export's effective-date column, and the audit trail), so
    the eval's date reasoning is transparent and reviewable.
+5. **Publication date-range cutoff (hard gate, distinct from the soft signal above).** Separately from the
+   effective-date *signal*, the **loop controller** enforces the request's **start and end dates** as the
+   in-scope window on **publication** date: an item the eval confidently dates (`dateConfidence` Medium/High)
+   as *published before the start date or after the end date* is outside the requested range, so it is
+   discarded (audit-only) regardless of verdict. Two deliberate boundaries: **undated / low-confidence**
+   items are never dropped on a date alone, and a **future *effective* date is not filtered** (an
+   announced-but-not-yet-in-force change published within the range is a legitimate horizon item). The date
+   range also *softly* scopes query synthesis (step 4); this cutoff is the only place the dates are *enforced*.
 
 This is implemented via the eval agent's prompt/instructions (what dates to find and how to weigh
 them) plus the structured output schema (explicit `publicationDate`, `effectiveDate`,

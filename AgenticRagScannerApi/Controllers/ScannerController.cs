@@ -45,8 +45,8 @@ public class ScannerController : ControllerBase
         }
 
         _logger.LogInformation(
-            "Scan requested: jurisdiction={Jurisdiction}, asOfDate={AsOfDate}, topicGroups={TopicGroupCount}",
-            request.Jurisdiction, request.AsOfDate, request.TopicGroups.Count);
+            "Scan requested: jurisdiction={Jurisdiction}, startDate={StartDate}, endDate={EndDate}, topicGroups={TopicGroupCount}",
+            request.Jurisdiction, request.StartDate, request.EndDate, request.TopicGroups.Count);
 
         var result = await _scanOrchestrator.RunAsync(request, cancellationToken);
 

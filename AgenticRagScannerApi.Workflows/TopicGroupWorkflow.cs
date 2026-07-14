@@ -42,8 +42,8 @@ public static class TopicGroupWorkflow
             .AddEdge(fetchAndClean, relevanceEval)
             .AddEdge(relevanceEval, loopController)
             // The Loop Controller emits its Review; the two conditional edges route on its decision.
-            .AddEdge<Review>(loopController, querySynthesis, condition: r => r.FinalDecision == LoopDecision.Retry)
-            .AddEdge<Review>(loopController, finalize, condition: r => r.FinalDecision == LoopDecision.Finalize)
+            .AddEdge<Review>(loopController, querySynthesis, condition: r => r?.FinalDecision == LoopDecision.Retry)
+            .AddEdge<Review>(loopController, finalize, condition: r => r?.FinalDecision == LoopDecision.Finalize)
             .WithOutputFrom(finalize)
             .Build();
     }

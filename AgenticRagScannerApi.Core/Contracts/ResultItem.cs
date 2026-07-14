@@ -68,7 +68,7 @@ public sealed class ResultItem
     /// <summary>Confidence in the extracted dates.</summary>
     public DateConfidence DateConfidence { get; set; }
 
-    // --- enrich / categorize / summarize ---
+    // --- enrich / categorize ---
 
     /// <summary>Plain-English "what it does" summary (enrichment).</summary>
     public string? WhatItDoes { get; set; }
@@ -81,9 +81,6 @@ public sealed class ResultItem
 
     /// <summary>Approved tags only (controlled vocabulary).</summary>
     public IReadOnlyList<string> Tags { get; set; } = [];
-
-    /// <summary>Plain-English impact summary (summarize and impact).</summary>
-    public string? ImpactSummary { get; set; }
 
     // --- quality gate ---
 

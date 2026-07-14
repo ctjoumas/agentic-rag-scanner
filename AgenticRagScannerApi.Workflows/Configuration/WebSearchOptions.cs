@@ -45,7 +45,8 @@ public sealed class WebSearchOptions
     /// <summary>
     /// Per-request timeout (seconds). Drives both the SDK network timeout on the Foundry
     /// <c>AIProjectClient</c> (raising it above the 100s default, since Bing-grounded agent runs can
-    /// exceed that) and the resilience pipeline's per-attempt backstop.
+    /// exceed that) and the resilience pipeline's per-attempt backstop. The upper bound allows values well
+    /// above the 100s SDK default (the System.ClientModel docs illustrate a 5-minute network timeout).
     /// </summary>
     [Range(1, 600)]
     public int RequestTimeoutSeconds { get; set; } = 240;

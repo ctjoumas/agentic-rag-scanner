@@ -208,7 +208,7 @@ this split right keeps cost down and makes each unit independently testable.
   **references** this agent; it takes the synthesized queries and **performs the grounded,
   allowlist-scoped web search** via its tool, returning hits/citations.
 - **MAF agents over a Foundry model deployment (5):** Query Synthesis (4), Relevance Eval (9),
-  Enrichment (12), Categorize (13), Summarize & Impact (14) are plain **MAF agents** that only
+  Enrichment (12), Categorize (13), Company View & Summary (14) are plain **MAF agents** that only
   **reference a Foundry project + model deployment** (a chat client) — no hosted agent, no tools.
   **Query Synthesis (4)** turns the request's topic groups into focused Bing **query strings** (it does
   *not* call Bing itself; the Web Search Foundry agent does).
@@ -223,8 +223,8 @@ this split right keeps cost down and makes each unit independently testable.
 | 5 | **Web Search Agent** *(Foundry agent — Grounding with Bing Custom Search tool)* | Execute the Query Synthesis agent's queries via the **Grounding with Bing Custom Search** tool (allowlist-scoped); return grounded hits/citations. | `string[] queries` (from agent 4) ? grounded allowlisted hits/citations | **4** |
 | 9 | **Relevance Eval Agent** | Single full-text call ? `RELEVANT/BORDERLINE/NOT_RELEVANT`; effective-date aware; applies retrieved learnings; judges goal coverage. | cleaned full text + dates + `SearchHistory` ? `Verdict` + date fields + rationale | **6** |
 | 12 | **Enrichment Agent** | Post-verdict enrichment only (relevance already decided): `whatItDoes` summary + metadata. | carried `ResultItem` ? enriched `ResultItem` | **7** |
-| 13 | **Categorize Agent** | Assign impact area, regulator, and **approved tags only** (controlled vocabulary). | enriched `ResultItem` ? category fields | **7** |
-| 14 | **Summarize & Impact Agent** | RAG over in-memory history ? plain-English impact summary + effective-date framing. | enriched `ResultItem` + `SearchHistory` ? summary/impact | **7** |
+| 13 | **Categorize (Impact Area + Tags)** | **Group-level:** one Impact Area call (single-label) + one Tags call (multi-label), each over **all** the group's carried updates' full text; results set on the aggregate `CompanyViewRecord`, not per item. | carried `ResultItem`s + full text ? group Impact Area + Tags | **8** |
+| 14 | **Company View & Summary Agent** | One consolidated **per-group** record from the carried items' **full text**, in a single call: a neutral summary of *what changed* AND the Company View advice. Prior Company Views (retrieved by jurisdiction) steer the Company View only; the summary uses no history. | carried `ResultItem`s + their full text (+ prior views by jurisdiction) ? `CompanyViewRecord` (summary + view) | **8** |
 
 > The two controller nodes — **Loop Controller (10)** and **Verdict Routing (11)** — are deterministic
 > orchestration owned by **L1**, not agents. **Web Search (5) is a distinct node:** the single
@@ -237,7 +237,7 @@ this split right keeps cost down and makes each unit independently testable.
   **Cosmos checkpointing** wired to the shared Azure Cosmos account (see Phase 9) so long runs are durable/resumable.
 - [ ] Build the loop scaffold threading `SearchHistory` through each pass:
   `QuerySynthesis (MAF agent) ? WebSearch (Foundry agent, Grounding with Bing Custom Search) ? Pre-filter ? Fetch&Clean ?`
-  `RelevanceEval ? LoopController ? VerdictRouting ? Enrichment ? Categorize ? Summarize&Impact`.
+  `RelevanceEval ? LoopController ? VerdictRouting ? Enrichment ? Categorize ? Company View`.
 - [ ] **Loop Controller** stub (deterministic): honor per-group `maxLoops` (default 3); append each pass to `SearchHistory`.
 - [ ] **Verdict Routing** stub (deterministic): RELEVANT/BORDERLINE ? enrichment; NOT_RELEVANT ? dropped + logged.
 - [ ] Stub the **Web Search Foundry agent** (Grounding with Bing Custom Search tool, allowlist-scoped) — takes queries, returns canned grounded hits. It is a **distinct node** between Query Synthesis and Pre-filter.
@@ -271,7 +271,7 @@ routes verdicts, emits stub `ResultItem`s, and **checkpoints to Cosmos**. No ext
 - [x] **(L2)** Implement `IFoundryService` against a **Microsoft Foundry project + model deployment**
   using `DefaultAzureCredential` (prefer an `IChatClient` abstraction via `Microsoft.Extensions.AI`);
   add resilience + throttle. **This is the chat client the five MAF agents reference** (Query Synthesis,
-  Relevance Eval, Enrichment, Categorize, Summarize & Impact) — they need only the project + deployment, no hosted agent.
+  Relevance Eval, Enrichment, Categorize, Company View) — they need only the project + deployment, no hosted agent.
   *(Shared `IChatClient` registered in DI, built from `AzureOpenAIClient` + `ResilientChatClient` (Polly retry/timeout + shared throttle + token/latency logging) and OpenTelemetry; `FoundryService` now delegates to it.)*
 - [x] **(L2)** Prompt management: externalized, versioned prompt templates. *(`QuerySynthesisPrompt` v1 + `docs/prompt-management.md`.)*
 - [x] **(L2)** **Query Synthesis Agent** (real) — implement as a **MAF agent over the Foundry model
@@ -303,6 +303,12 @@ targets untested synonyms/gaps. (Grounded hits arrive once the Web Search Foundr
   `IBingCustomSearchGroundingService` — grounding is owned by the Foundry agent's tool.)*
 - [ ] **(L2)** Verify the agent returns grounded hits/citations restricted to allowlisted domains;
   tune the tool's result count / configuration.
+- [x] **(L2)** **Resilience:** **stream** the agent run (`RunStreamingAsync` → aggregated response) to
+  avoid the synchronous-response **HTTP 408** on long Bing-grounded runs; Polly retry on transient
+  failures (status `0` / `408` / `429` / `5xx`) with exponential backoff + jitter and a per-attempt
+  timeout, funnelled through the shared throttle; **graceful degrade** to no-hits (log, not abort) on
+  exhaustion. Per-request timeout = `WebSearch:RequestTimeoutSeconds` (range `1–600`, default `240`),
+  which drives the SDK `AIProjectClient.NetworkTimeout`.
 - [ ] **(L1/L3)** **Deterministic pre-filter:** dedupe (incl. **cross-group**), URL
   reachability/validity. Pure functions, fully unit-tested.
 
@@ -433,16 +439,16 @@ completed step; the loop-back/finalize branch is driven by the Loop Controller e
 
 ---
 
-### Phase 8 — Enrichment + Categorize (Impact Area + Tags) + Summary + Deloitte View · *L2-led*
-**Goal:** finish the downstream agents that run on each carried **regulatory update** (what Bing surfaces for a topic group) **after** the Agentic RAG loop: optional enrichment, categorization split into **Impact Area** + **Tags** (separate LLM calls), a professional **Summary**, and a practitioner-style **Deloitte View**. `? arch steps 12–14`
+### Phase 8 — Enrichment + Categorize (Impact Area + Tags) + Summary + Company View · *L2-led* · ✅ **Complete**
+**Goal:** finish the downstream agents that run **after** the Agentic RAG loop for a topic group: optional per-item enrichment, **group-level** categorization split into **Impact Area** + **Tags** (separate LLM calls, each over **all** the group's carried updates' full text), and a per-group **Company View** agent that — in a **single full-text call** — produces **both** a professional **Summary of Update** and the practitioner-style **Company View**. Impact Area + Tags are set on the aggregate `CompanyViewRecord`, not on individual items. `? arch steps 12–14`
 
 **Tasks**
 - [ ] **(L2)** **Enrichment Agent** (`WhatItDoes` summary + metadata) — **parked / optional.** The customer does not currently need this, so it stays **unscheduled but retained** in the plan; revisit if a "what it does" summary is later wanted. *(Do not delete — pending customer confirmation.)*
-- [ ] **(L2)** **Impact Area Agent:** assign **one impact area** to the regulatory update using the **topic group** + the **vetted full-text documents** from the end of the Agentic RAG loop, against the **approved impact-area vocabulary loaded from Cosmos** (RegDocs, `doc_type = "ImpactAreas"`). Single-label; the controlled vocabulary is a closed set — the agent must pick exactly one.
-- [ ] **(L2)** **Tags Agent** (separate agent / separate LLM call): assign **one or more tags** from the **approved tag vocabulary loaded from Cosmos** (RegDocs, `doc_type = "tags"`). Kept separate from Impact Area on purpose — one LLM task per prompt, independently tunable/evaluable, and tags are multi-label while impact area is single-label.
-- [ ] **(L2)** **Load both vocabularies from Cosmos at runtime** via `ICosmosRepository<T>` against the **RegDocs** container (partition key `/doc_type`). Docs are `{ id, doc_type, name }`; query by partition key `"ImpactAreas"` / `"tags"` and project `name`. Cosmos is the **single source of truth** — do **not** hardcode the lists into the prompts/agents. The vocabularies are seeded via `dotnet run -- seed` (`ImpactAreaSeeder` / `TagSeeder`, both merged to `main`); the RegDocs container is provisioned via IaC (`infra/modules/cosmos.bicep`).
-- [ ] **(L2)** **Summary Agent:** a **professional summarization** of the regulatory update found for the topic group.
-- [ ] **(L2)** **Deloitte View Agent** (separate agent): produce the **Deloitte View** — how a Deloitte practitioner would advise a client about the update — using **RAG over prior Deloitte Views** retrieved **by jurisdiction** (jurisdiction is **passed in on the scan request**). Prior views share a consistent house style/tone and steer the output. **Retrieval source:** local testing reads a **CSV** of historical Deloitte Views (customer spreadsheet); the production source is **SQL** (relational by jurisdiction, e.g. `WHERE jurisdiction = 'United Kingdom'`) — SQL wiring **deferred**, behind a retrieval abstraction.
+- [x] **(L2)** **Impact Area Agent (group-level):** assign **one impact area** to the **topic group as a whole** using the topic group + a **single call over ALL the group's carried updates' vetted full text** (not per item), against the **approved impact-area vocabulary loaded from Cosmos** (RegDocs, `doc_type = "ImpactAreas"`). Single-label, closed set — the agent must pick exactly one; the result is set on the aggregate `CompanyViewRecord`, not on `ResultItem`s.
+- [x] **(L2)** **Tags Agent (group-level)** (separate agent / separate LLM call): assign **one or more tags** for the **topic group as a whole** over **all** the group's carried updates' full text, from the **approved tag vocabulary loaded from Cosmos** (RegDocs, `doc_type = "tags"`). Kept separate from Impact Area on purpose — one LLM task per prompt, independently tunable/evaluable, and tags are multi-label while impact area is single-label; the result is set on the aggregate `CompanyViewRecord`.
+- [x] **(L2)** **Load both vocabularies from Cosmos at runtime** via `ICosmosRepository<T>` against the **RegDocs** container (partition key `/doc_type`). Docs are `{ id, doc_type, name }`; query by partition key `"ImpactAreas"` / `"tags"` and project `name`. Cosmos is the **single source of truth** — do **not** hardcode the lists into the prompts/agents. The vocabularies are seeded via `dotnet run -- seed` (`ImpactAreaSeeder` / `TagSeeder`, both merged to `main`); the RegDocs container is provisioned via IaC (`infra/modules/cosmos.bicep`).
+- [x] **(L2)** **Summary (merged into the Company View agent):** a **professional, neutral summarization** of the regulatory update(s) for the topic group — *what changed* — grounded in the **vetted full text**. **No separate per-item summary agent:** the Company View agent produces it as the record's `Summary of Update` in the **same single call** (using no historical views).
+- [x] **(L2)** **Company View Agent** (separate agent): produce **one Company View per topic group** — a single record that **aggregates the group's carried updates** (grounded on their **vetted full text**, plus the **group-level** Impact Area and Tags) into practitioner-style client advice, taking the **topic group** into account — using **RAG over prior Company Views** retrieved **by jurisdiction** (jurisdiction is **passed in on the scan request**). It runs **once per group, after** the per-item enrichment and the group-level categorization, grounding on each carried item's **full text** (not a per-item summary), and its output is a **structured record shaped to match the customer's `RegulatoryUpdatesCsv`** (`CompanyViewRecord`: Jurisdiction · Impact Area · Tags · Title of Update · Summary of Update · Company View · Level of Authority · Status of Change · Announcement date · Effective Date of Change · Supporting reference · Regulator), surfaced on **`TopicGroupResult`** (not a per-item field). Objective fields are set deterministically — **jurisdiction** from the scan request, **dates + supporting references** aggregated from the carried items, and **Impact Area + Tags from the group-level agents** — while the judgement fields (title, **Summary of Update**, Company View, level of authority, status, regulator) are **synthesized by the model** in a **single Structured-Outputs call** over the carried items' **full text** — the **Summary of Update** uses **no** prior views, while the **Company View** is steered (house style/tone) by them. **Retrieval source:** local testing reads a **CSV** of historical records (customer spreadsheet); the production source is **SQL** (relational by jurisdiction, e.g. `WHERE jurisdiction = 'United Kingdom'`) — SQL wiring **deferred**, behind a retrieval abstraction.
 
 **Impact areas (approved vocabulary — single-label; runtime source: Cosmos RegDocs `doc_type = "ImpactAreas"`):**
 1. Administration of employment taxes withholding & payments
@@ -461,12 +467,13 @@ completed step; the loop-back/finalize branch is driven by the Loop Controller e
 Payroll Reporting · National Insurance · Social Security · International Tax Treaties · Remote Work · PE · Expat tax regime · s.690 · Overseas Workday Relief · Company Cars · EVs · Benefits In Kind · ECOS · Class 2 NIC · CIS · Construction · Tax Authority Enforcement · Employee Benefits · Exemptions · Eye Tests · IR35 · Off Payroll · End Client · Remote Working · Home Exemption · Tax Return Deduction · Pensions · Salary Sacrifice · Fuel Rates · Income Tax
 
 **Follow-ups / open items**
-- **Regulator field struck** from categorization — its meaning in this context is unclear; **follow up with the customer** before re-adding.
-- **Jurisdiction** must be added to the **scan-request contract** (Phase 0/1) since the Deloitte View retrieval keys on it.
-- Deloitte View retrieval abstraction: **CSV-backed** for local, **SQL-backed in production** (later task).
+- **Regulator field struck** from the per-item categorization — its meaning there was unclear; **follow up with the customer**. It is, however, **present on the aggregate `CompanyViewRecord`** (the model synthesizes it) so that record matches the `RegulatoryUpdatesCsv` shape.
+- **Jurisdiction** — **done:** added to the **scan-request contract** (`ScanRequest.Jurisdiction`, flowed via `RunContext.Jurisdiction`); the Company View retrieval keys on it.
+- The Company View is a **group-level aggregate** on **`TopicGroupResult`** (one per topic group), shaped to match the historical `RegulatoryUpdatesCsv` columns — not a per-item field.
+- Company View retrieval abstraction: **CSV-backed** for local, **SQL-backed in production** (later task).
 - The enumerated impact-area / tag lists above are the **reference copy**; the **runtime source is Cosmos RegDocs** (seeded via `dotnet run -- seed`). Keep the two in sync if the customer revises the vocabulary — re-seed rather than editing prompts.
 
-**DoD / demo:** each carried regulatory update has an **impact area**, one or more **tags**, a professional **Summary**, and a **Deloitte View** grounded in prior jurisdiction-matched views (CSV locally); the Enrichment agent remains parked.
+**DoD / demo:** each **topic group** has one aggregate **Company View** record (shaped like `RegulatoryUpdatesCsv`) carrying a **group-level Impact Area + Tags** and a professional **Summary of Update**, grounded in prior jurisdiction-matched views (CSV locally); individual carried items no longer carry per-item impact area / tags; the Enrichment agent remains parked.
 
 ---
 

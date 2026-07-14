@@ -14,4 +14,12 @@ public interface IFullTextStore
     /// <c>fulltext/{runId}/{groupId}/{itemId}.txt</c> and returns the blob reference (NOT a SAS link).
     /// </summary>
     Task<string> PersistAsync(string runId, string groupId, string itemId, string text, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reads back the cleaned full text previously snapshotted by <see cref="PersistAsync"/> under the
+    /// same deterministic key, or <see langword="null"/> when no snapshot exists (the fetch had failed,
+    /// so the loop never persisted one). The post-loop enrichment agents (Epic 8) use this to ground on
+    /// exactly what the Relevance Eval agent read, without keeping the bytes in memory or in Cosmos.
+    /// </summary>
+    Task<string?> ReadAsync(string runId, string groupId, string itemId, CancellationToken cancellationToken = default);
 }

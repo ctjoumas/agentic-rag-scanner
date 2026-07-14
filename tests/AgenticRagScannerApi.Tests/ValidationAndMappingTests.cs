@@ -13,7 +13,7 @@ public class ValidationAndMappingTests
         var validator = new ScanRequestValidator();
         var request = new ScanRequest
         {
-            AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow),
             Jurisdiction = "United Kingdom",
             TopicGroups = [],
         };
@@ -30,7 +30,7 @@ public class ValidationAndMappingTests
         var mapper = new ScanMapper();
         var request = new ScanRequest
         {
-            AsOfDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = DateOnly.FromDateTime(DateTime.UtcNow),
             Jurisdiction = "United Kingdom",
             TopicGroups = ["Tax", "Conduct"],
         };

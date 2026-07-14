@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
+using AgenticRagScannerApi.Workflows.Common;
 using AgenticRagScannerApi.Workflows.Pipeline;
 
 namespace AgenticRagScannerApi.Workflows.Prompts;
@@ -18,27 +19,27 @@ namespace AgenticRagScannerApi.Workflows.Prompts;
 public static class RelevanceEvalPrompt
 {
     /// <summary>Prompt version - bump when the instructions change (version-locked with the query-synth prompt).</summary>
-    public const string Version = "v2";
+    public const string Version = "v3";
 
     /// <summary>
     /// Builds the system prompt: role, the three-way verdict rubric, effective-date rules, and the
     /// ThoughtProcess steer shape. The response shape is enforced by Structured Outputs (a JSON schema),
     /// so the prompt describes the judgement, not the JSON wrapper.
     /// </summary>
-    public static string BuildSystemPrompt(string groupName, string jurisdiction, string asOfDate) =>
+    public static string BuildSystemPrompt(string groupName, string jurisdiction, string dateRange) =>
         $$"""
         You are a relevance-and-compliance reviewer for a regulatory horizon-scanning system. You read
         the FULL TEXT of candidate documents retrieved for one topic group and decide, for each one,
         whether it is a genuine primary-source regulatory update for the '{{groupName}}' theme in the
-        {{jurisdiction}} jurisdiction. The scan's reference ("as-of") date is {{asOfDate}}.
+        {{jurisdiction}} jurisdiction. The scan is scoped to the date range {{dateRange}}.
 
         A topic group is ONE coherent theme expressed through many surface forms (synonyms, aliases,
         acronyms that co-occur on authoritative pages). Judge each document against that whole theme.
 
         Per-document verdict (assign exactly one):
         - RELEVANT: a primary-source (government, regulator, legislation, official guidance) item that
-          materially updates, changes, or states the rules for this theme and applies on/around the
-          as-of date.
+          materially updates, changes, or states the rules for this theme and applies within or bears on
+          the scan's date range.
         - BORDERLINE: on-theme and plausibly useful but weaker - secondary/commentary source, ambiguous
           applicability, partial coverage, or dates you cannot pin down confidently. Carry it forward
           flagged; do NOT drop it.
@@ -86,7 +87,7 @@ public static class RelevanceEvalPrompt
 
         builder.AppendLine($"Topic group: {context.TopicGroup.Name}");
         builder.AppendLine($"Jurisdiction: {context.Run.Jurisdiction}");
-        builder.AppendLine($"As-of date: {FormatAsOf(context)}");
+        builder.AppendLine($"Date range: {ScanDateRange.Format(context.Run)}");
         builder.AppendLine($"Pass: {pass} of up to {context.TopicGroup.MaxLoops}");
 
         builder.AppendLine("Keyword / synonym OR-list defining the theme:");
@@ -192,10 +193,6 @@ public static class RelevanceEvalPrompt
         static string D(DateOnly? d) => d?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "?";
         return $"pub={D(item.PublicationDate)} eff={D(item.EffectiveDate)} applies={D(item.AppliesFrom)}->{D(item.AppliesTo)} conf={item.DateConfidence}";
     }
-
-    private static string FormatAsOf(TopicGroupContext context) =>
-        context.Run.AsOfDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
-        ?? context.Run.StartedAtUtc.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
     private static string Truncate(string? text, int maxChars)
     {
