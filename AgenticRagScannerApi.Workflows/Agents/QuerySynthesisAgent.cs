@@ -1,7 +1,7 @@
-using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgenticRagScannerApi.Core.Runtime;
+using AgenticRagScannerApi.Workflows.Common;
 using AgenticRagScannerApi.Workflows.Configuration;
 using AgenticRagScannerApi.Workflows.Prompts;
 using Microsoft.Agents.AI;
@@ -43,7 +43,7 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
     public async Task<QuerySynthesisResult> SynthesizeAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
     {
         var pass = context.LoopCount + 1;
-        var window = FormatWindow(context);
+        var window = ScanDateRange.Format(context.Run);
         var systemPrompt = QuerySynthesisPrompt.BuildSystemPrompt(context.Run.Jurisdiction, window);
         var userPrompt = QuerySynthesisPrompt.BuildUserPrompt(context);
 
@@ -107,21 +107,6 @@ public sealed class QuerySynthesisAgent : IQuerySynthesisAgent
         {
             return null;
         }
-    }
-
-    /// <summary>
-    /// The scan's date-range window, formatted for the prompt. A null end date falls back to the run's
-    /// start date; a null start date renders as an open lower bound. Mirrors the relevance-eval agent so
-    /// both prompts share one window description.
-    /// </summary>
-    private static string FormatWindow(TopicGroupContext context)
-    {
-        var end = context.Run.EndDate
-            ?? DateOnly.FromDateTime(context.Run.StartedAtUtc.UtcDateTime);
-        var endText = end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        return context.Run.StartDate is { } start
-            ? $"{start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} to {endText}"
-            : $"on or before {endText}";
     }
 
     /// <summary>Deterministic single-query fallback derived from the topic group's keywords.</summary>

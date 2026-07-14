@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
+using AgenticRagScannerApi.Workflows.Common;
 using AgenticRagScannerApi.Workflows.Pipeline;
 
 namespace AgenticRagScannerApi.Workflows.Prompts;
@@ -86,7 +87,7 @@ public static class RelevanceEvalPrompt
 
         builder.AppendLine($"Topic group: {context.TopicGroup.Name}");
         builder.AppendLine($"Jurisdiction: {context.Run.Jurisdiction}");
-        builder.AppendLine($"Date range: {FormatWindow(context)}");
+        builder.AppendLine($"Date range: {ScanDateRange.Format(context.Run)}");
         builder.AppendLine($"Pass: {pass} of up to {context.TopicGroup.MaxLoops}");
 
         builder.AppendLine("Keyword / synonym OR-list defining the theme:");
@@ -191,16 +192,6 @@ public static class RelevanceEvalPrompt
     {
         static string D(DateOnly? d) => d?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "?";
         return $"pub={D(item.PublicationDate)} eff={D(item.EffectiveDate)} applies={D(item.AppliesFrom)}->{D(item.AppliesTo)} conf={item.DateConfidence}";
-    }
-
-    private static string FormatWindow(TopicGroupContext context)
-    {
-        var end = context.Run.EndDate
-            ?? DateOnly.FromDateTime(context.Run.StartedAtUtc.UtcDateTime);
-        var endText = end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        return context.Run.StartDate is { } start
-            ? $"{start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} to {endText}"
-            : $"on or before {endText}";
     }
 
     private static string Truncate(string? text, int maxChars)

@@ -7,14 +7,14 @@ using Microsoft.Extensions.Options;
 namespace AgenticRagScannerApi.Tests;
 
 /// <summary>
-/// Story 8.5 - <see cref="CsvPriorDeloitteViewSource"/> parses the customer's historical regulatory-updates
-/// CSV (with its description row under the header and multi-line quoted cells), filters prior Deloitte
+/// Story 8.5 - <see cref="CsvPriorCompanyViewSource"/> parses the customer's historical regulatory-updates
+/// CSV (with its description row under the header and multi-line quoted cells), filters prior Company
 /// Views by jurisdiction (case-insensitively), and degrades to empty when the file is missing/unset.
 /// </summary>
-public sealed class CsvPriorDeloitteViewSourceTests : IDisposable
+public sealed class CsvPriorCompanyViewSourceTests : IDisposable
 {
     private const string Csv =
-        "Jurisdiction,Impact Area,Tags,Title of Update,Summary of Update,Deloitte View,Level of Authority,Status of Change,Announcement date,Effective Date of Change,Supporting reference,Regulator\n" +
+        "Jurisdiction,Impact Area,Tags,Title of Update,Summary of Update,Company View,Level of Authority,Status of Change,Announcement date,Effective Date of Change,Supporting reference,Regulator\n" +
         "INTERNAL USE ONLY,description,description,description,description,,description,description,description,description,description,description\n" +
         "United Kingdom,Employment taxes rates & thresholds,\"Fuel Rates, Company Cars\",Advisory Fuel Rates,AFR summary,\"Employers should update expenses policies.\nStay alert to non-routine updates.\",Regulator guidance,In force,2026-03-01,2026-03-01,https://gov.uk/afr,HMRC\n" +
         "Australia,Some area,Payroll,Aussie update,Aussie summary,Australian view text.,Legislation,Proposed,2026-01-01,2026-07-01,https://ato.gov.au/x,ATO\n" +
@@ -22,10 +22,10 @@ public sealed class CsvPriorDeloitteViewSourceTests : IDisposable
 
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"regupdates-{Guid.NewGuid():N}.csv");
 
-    private CsvPriorDeloitteViewSource CreateSource(string? filePath)
+    private CsvPriorCompanyViewSource CreateSource(string? filePath)
     {
         var options = Options.Create(new RegulatoryUpdatesCsvOptions { FilePath = filePath ?? string.Empty });
-        return new CsvPriorDeloitteViewSource(options, NullLogger<CsvPriorDeloitteViewSource>.Instance);
+        return new CsvPriorCompanyViewSource(options, NullLogger<CsvPriorCompanyViewSource>.Instance);
     }
 
     [Fact]
@@ -38,8 +38,8 @@ public sealed class CsvPriorDeloitteViewSourceTests : IDisposable
 
         views.Should().HaveCount(2);
         views.Select(v => v.TitleOfUpdate).Should().BeEquivalentTo(new[] { "Advisory Fuel Rates", "Second UK update" });
-        views.Should().Contain(v => v.DeloitteView!.Contains("Employers should update expenses policies")
-            && v.DeloitteView.Contains("Stay alert to non-routine updates."));
+        views.Should().Contain(v => v.CompanyView!.Contains("Employers should update expenses policies")
+            && v.CompanyView.Contains("Stay alert to non-routine updates."));
 
         var afr = views.Single(v => v.TitleOfUpdate == "Advisory Fuel Rates");
         afr.Jurisdiction.Should().Be("United Kingdom");

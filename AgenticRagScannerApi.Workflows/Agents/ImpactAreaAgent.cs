@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
+using AgenticRagScannerApi.Workflows.Common;
 using AgenticRagScannerApi.Workflows.Prompts;
 using AgenticRagScannerApi.Workflows.Vocabulary;
 using Microsoft.Agents.AI;
@@ -95,7 +96,7 @@ public sealed class ImpactAreaAgent : IImpactAreaAgent
                 "ImpactArea ({PromptVersion}) for group '{GroupId}': model returned an off-list value '{Value}'; leaving impact area unset.",
                 ImpactAreaPrompt.Version, context.TopicGroup.Id, response.Result?.ImpactArea ?? "(null)");
         }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        catch (Exception ex) when (ChatFailure.IsDegradable(ex, cancellationToken))
         {
             _logger.LogWarning(
                 ex,

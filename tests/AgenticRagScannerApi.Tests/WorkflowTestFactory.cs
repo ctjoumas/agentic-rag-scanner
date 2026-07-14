@@ -105,7 +105,7 @@ internal static class WorkflowTestFactory
         services.AddSingleton<IEnrichmentAgent>(sp => new EnrichmentAgentStub(sp.GetRequiredService<ILogger<EnrichmentAgentStub>>()));
         services.AddSingleton<IImpactAreaAgent>(sp => new ImpactAreaAgentStub(sp.GetRequiredService<ILogger<ImpactAreaAgentStub>>()));
         services.AddSingleton<ITagsAgent>(sp => new TagsAgentStub(sp.GetRequiredService<ILogger<TagsAgentStub>>()));
-        services.AddSingleton<IDeloitteViewAgent>(sp => new DeloitteViewAgentStub(sp.GetRequiredService<ILogger<DeloitteViewAgentStub>>()));
+        services.AddSingleton<ICompanyViewAgent>(sp => new CompanyViewAgentStub(sp.GetRequiredService<ILogger<CompanyViewAgentStub>>()));
 
         return services.BuildServiceProvider();
     }

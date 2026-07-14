@@ -1,19 +1,19 @@
 namespace AgenticRagScannerApi.Core.Contracts;
 
 /// <summary>
-/// A regulatory-update + Deloitte View record shaped to match the customer's historical
+/// A regulatory-update + Company View record shaped to match the customer's historical
 /// <c>RegulatoryUpdatesCsv</c> columns (Epic 8, story 8.5). The same model is used two ways:
 /// <list type="bullet">
 ///   <item>as a <em>prior</em> record read from the CSV (a house-style exemplar for RAG), and</item>
 ///   <item>as the <em>produced</em> aggregate for a topic group - one record per group that rolls up its
 ///   carried regulatory updates (their summaries, impact areas, and tags) into a single practitioner
-///   Deloitte View, grounded in the topic group and steered by the prior records for the jurisdiction.</item>
+///   Company View, grounded in the topic group and steered by the prior records for the jurisdiction.</item>
 /// </list>
 /// Free-text/date fields are kept as strings to match the CSV's free-form cells faithfully. The internal
 /// administrative CSV columns (<c>Update Month</c>, <c>ID</c>, <c>Linked IDs</c>) are intentionally
 /// omitted - they are bookkeeping, not content the agent produces.
 /// </summary>
-public sealed class DeloitteViewRecord
+public sealed class CompanyViewRecord
 {
     /// <summary>CSV: <c>Jurisdiction</c>.</summary>
     public string? Jurisdiction { get; set; }
@@ -30,8 +30,8 @@ public sealed class DeloitteViewRecord
     /// <summary>CSV: <c>Summary of Update</c>.</summary>
     public string? SummaryOfUpdate { get; set; }
 
-    /// <summary>CSV: <c>Deloitte View</c> - the practitioner-style client advice.</summary>
-    public string? DeloitteView { get; set; }
+    /// <summary>CSV: <c>Company View</c> - the practitioner-style client advice.</summary>
+    public string? CompanyView { get; set; }
 
     /// <summary>CSV: <c>Level of Authority</c>.</summary>
     public string? LevelOfAuthority { get; set; }

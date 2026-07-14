@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
+using AgenticRagScannerApi.Workflows.Common;
 using AgenticRagScannerApi.Workflows.Pipeline;
 using AgenticRagScannerApi.Workflows.Prompts;
 using Microsoft.Agents.AI;
@@ -91,7 +92,7 @@ public sealed class RelevanceEvalAgent : IRelevanceEvalAgent
         var systemPrompt = RelevanceEvalPrompt.BuildSystemPrompt(
             context.TopicGroup.Name,
             context.Run.Jurisdiction,
-            FormatWindow(context));
+            ScanDateRange.Format(context.Run));
         var userPrompt = RelevanceEvalPrompt.BuildUserPrompt(context, documents, MaxCharsPerDocument);
 
         var agent = new ChatClientAgent(_chatClient, new ChatClientAgentOptions
@@ -260,16 +261,6 @@ public sealed class RelevanceEvalAgent : IRelevanceEvalAgent
         return DateOnly.TryParse(value.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
             ? date
             : null;
-    }
-
-    private static string FormatWindow(TopicGroupContext context)
-    {
-        var end = context.Run.EndDate
-            ?? DateOnly.FromDateTime(context.Run.StartedAtUtc.UtcDateTime);
-        var endText = end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        return context.Run.StartDate is { } start
-            ? $"{start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} to {endText}"
-            : $"on or before {endText}";
     }
 
     private sealed record EvalResult(

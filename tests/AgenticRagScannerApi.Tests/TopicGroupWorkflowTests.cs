@@ -92,11 +92,11 @@ public class TopicGroupWorkflowTests
         result.Items.Should().OnlyContain(i => i.Verdict == Verdict.Relevant || i.Verdict == Verdict.Borderline);
         result.Items.Should().OnlyContain(i => i.WhatItDoes != null);
 
-        // Impact area and tags are group-level (story 8.2/8.3), set on the aggregate Deloitte View - not
-        // per item. The Deloitte View is a single group-level aggregate (story 8.5).
-        result.DeloitteView.Should().NotBeNull();
-        result.DeloitteView!.DeloitteView.Should().NotBeNullOrWhiteSpace();
-        result.DeloitteView.ImpactArea.Should().NotBeNullOrWhiteSpace();
-        result.DeloitteView.Tags.Should().NotBeEmpty();
+        // Impact area and tags are group-level (story 8.2/8.3), set on the aggregate Company View - not
+        // per item. The Company View is a single group-level aggregate (story 8.5).
+        result.CompanyView.Should().NotBeNull();
+        result.CompanyView!.CompanyView.Should().NotBeNullOrWhiteSpace();
+        result.CompanyView.ImpactArea.Should().NotBeNullOrWhiteSpace();
+        result.CompanyView.Tags.Should().NotBeEmpty();
     }
 }

@@ -14,8 +14,8 @@ namespace AgenticRagScannerApi.Workflows.Executors;
 /// (<see cref="IVerdictRouting"/>), reads back each carried item's vetted full-text snapshot, runs the
 /// per-item enrichment step over the carried items, then categorizes the group as a whole - one Impact
 /// Area call and one Tags call, each grounded on ALL the carried items' full text - and generates one
-/// aggregate Deloitte View record for the group (a single call that produces both the neutral summary and
-/// the Deloitte View, grounded on each item's full text plus the group-level impact area and tags), and
+/// aggregate Company View record for the group (a single call that produces both the neutral summary and
+/// the Company View, grounded on each item's full text plus the group-level impact area and tags), and
 /// yields the aggregated <see cref="TopicGroupResult"/> as the workflow output.
 /// </summary>
 /// <remarks>
@@ -33,7 +33,7 @@ public sealed class FinalizeExecutor : Executor<Review>
     private readonly IEnrichmentAgent _enrichment;
     private readonly IImpactAreaAgent _impactArea;
     private readonly ITagsAgent _tags;
-    private readonly IDeloitteViewAgent _deloitteView;
+    private readonly ICompanyViewAgent _companyView;
     private readonly IFullTextStore _fullTextStore;
     private readonly ILogger<FinalizeExecutor> _logger;
 
@@ -43,7 +43,7 @@ public sealed class FinalizeExecutor : Executor<Review>
         IEnrichmentAgent enrichment,
         IImpactAreaAgent impactArea,
         ITagsAgent tags,
-        IDeloitteViewAgent deloitteView,
+        ICompanyViewAgent companyView,
         IFullTextStore fullTextStore,
         ILogger<FinalizeExecutor> logger)
         : base($"finalize-{context.TopicGroup.Id}")
@@ -53,7 +53,7 @@ public sealed class FinalizeExecutor : Executor<Review>
         _enrichment = enrichment;
         _impactArea = impactArea;
         _tags = tags;
-        _deloitteView = deloitteView;
+        _companyView = companyView;
         _fullTextStore = fullTextStore;
         _logger = logger;
     }
@@ -90,15 +90,17 @@ public sealed class FinalizeExecutor : Executor<Review>
             tags = await tagsTask;
         }
 
-        // Aggregate: one Deloitte View record per topic group in a single call - both the neutral summary
-        // and the Deloitte View, grounded on each item's full text plus the group-level impact area and
+        // Aggregate: one Company View record per topic group in a single call - both the neutral summary
+        // and the Company View, grounded on each item's full text plus the group-level impact area and
         // tags (null when the group carried nothing).
-        var deloitteView = await _deloitteView.GenerateAsync(carried, fullTextByItemId, impactArea, tags, _context, cancellationToken);
+        var companyView = await _companyView.GenerateAsync(carried, fullTextByItemId, impactArea, tags, _context, cancellationToken);
 
-        // A group that carried nothing *because* a pass's web search failed (timeout/error) is not a clean
+        // A group that carried nothing *because* its final web search failed (timeout/error) is not a clean
         // empty scan - report it as Failed so the caller can distinguish "search worked, found nothing" from
-        // "search never ran". A genuine empty result (search succeeded, zero citations) stays Completed.
-        var searchFailed = _context.History.Passes.Any(p => p.SearchFailed);
+        // "search never ran". We key off the LAST pass only: an earlier pass that failed transiently but was
+        // retried and recovered should not taint the outcome. A genuine empty result (final search succeeded,
+        // zero citations) stays Completed.
+        var searchFailed = _context.History.CurrentPass?.SearchFailed == true;
         var status = carried.Count == 0 && searchFailed ? "Failed" : "Completed";
 
         var result = new TopicGroupResult
@@ -108,7 +110,7 @@ public sealed class FinalizeExecutor : Executor<Review>
             Status = status,
             LoopCount = _context.LoopCount,
             Items = carried,
-            DeloitteView = deloitteView,
+            CompanyView = companyView,
             History = SearchHistorySerializer.ToSnapshot(_context.History),
         };
 

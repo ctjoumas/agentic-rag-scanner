@@ -58,9 +58,9 @@ Auditor Request (date + jurisdiction + topic groups)
         7. Enrichment (parked/optional)  per-item whatItDoes summary + metadata
         8. Categorize (group-level)      one Impact Area (single-label) + one Tags (multi-label)
                                          LLM call, each over ALL the group's carried full text
-        9. Deloitte View Agent           one aggregate record per group — a neutral Summary of
-                                         Update + practitioner Deloitte View in a single call,
-                                         with RAG over prior Deloitte Views by jurisdiction
+        9. Company View Agent            one aggregate record per group — a neutral Summary of
+                                         Update + practitioner Company View in a single call,
+                                         with RAG over prior Company Views by jurisdiction
    └─ Deterministic Quality Gates    schema validation, dedupe vs. store, level-of-authority
    └─ Result Docs → Cosmos DB        one versioned doc per item per run
 ```
@@ -85,7 +85,7 @@ minimizes latency and cost, and (critically) avoids the long agent-run durations
 domain allowlist plus the code's own allowlist/dedup/URL checks scope the sources, and every hit is
 independently vetted downstream by the Relevance Eval agent before it is categorized or written up. Heavier
 models and higher reasoning effort are reserved for the agents that make real decisions (relevance
-evaluation, the Deloitte View). On the client side the agent run is **streamed** (aggregated back into one
+evaluation, the Company View). On the client side the agent run is **streamed** (aggregated back into one
 response) and wrapped in a Polly retry + per-request timeout to further guard the synchronous-timeout path.
 
 Each per-group workflow is built as a **seven-executor MAF graph** (Query Synthesis → Web Search →
@@ -115,7 +115,7 @@ For full design details see [docs/horizon-scanner-architecture.md](docs/horizon-
 
 | Service | Role | Status |
 |---------|------|--------|
-| **Microsoft Foundry** (+ model deployment) | Hosts the models behind every LLM call (query synthesis, relevance eval, group-level impact area + tags, and the aggregate Deloitte View / summary). | Required |
+| **Microsoft Foundry** (+ model deployment) | Hosts the models behind every LLM call (query synthesis, relevance eval, group-level impact area + tags, and the aggregate Company View / summary). | Required |
 | **Grounding with Bing Custom Search** (Foundry connection) | Web search for the Web Search agent, scoped to the primary-source allowlist. | Required |
 | **Azure Cosmos DB** | Versioned result documents (one per item per run), reference-data taxonomies (tags, impact areas), and MAF workflow checkpointing. | Required |
 | **Azure Storage account** (Blob) | Storage for fetched documents, exports, and working artifacts. | Required |
@@ -324,8 +324,8 @@ snapshots, a ≥80%-RELEVANT recall override, and a loop-feedback steer back int
 decomposition of the per-group loop into a **seven-executor MAF graph** with mid-pass checkpoint
 resume (see [docs/maf-executor-design.md](docs/maf-executor-design.md)), and the **finalize chain** —
 **group-level categorization** (one Impact Area + one Tags call over all of a group's carried full
-text) and an **aggregate Deloitte View** per topic group that produces both a neutral *Summary of
-Update* and the practitioner *Deloitte View* in a single call, via RAG over prior Deloitte Views by
+text) and an **aggregate Company View** per topic group that produces both a neutral *Summary of
+Update* and the practitioner *Company View* in a single call, via RAG over prior Company Views by
 jurisdiction.
 Later epics cover the deterministic quality gates + Cosmos persistence, publish/export,
 and the future memory/review loop.

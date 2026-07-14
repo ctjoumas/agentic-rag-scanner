@@ -1,5 +1,6 @@
 using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
+using AgenticRagScannerApi.Workflows.Common;
 using AgenticRagScannerApi.Workflows.Pipeline;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
@@ -77,9 +78,7 @@ public sealed class LoopController : ILoopController
         // window - undated / low-confidence items are never dropped solely on a date, consistent with the
         // eval philosophy. A null start date means no lower cutoff; a null end date falls back to the run's
         // start date. Future EFFECTIVE dates are legitimate horizon items and are deliberately NOT filtered.
-        var lowerBound = context.Run.StartDate;
-        var upperBound = context.Run.EndDate
-            ?? DateOnly.FromDateTime(context.Run.StartedAtUtc.UtcDateTime);
+        var (lowerBound, upperBound) = ScanDateRange.Resolve(context.Run);
         var outOfWindow = 0;
 
         var review = new Review
@@ -124,8 +123,8 @@ public sealed class LoopController : ILoopController
         pass.Review = review;
 
         _logger.LogInformation(
-            "Loop controller: group '{GroupId}' pass {Pass}/{MaxLoops} -> {Decision} (eval said {LlmDecision}; {RelevantShare:P0} relevant; vetted {Vetted}, discarded {Discarded} (of which {OutOfWindow} outside window {Start}..{End})){Override}).",
-            context.TopicGroup.Id, pass, context.TopicGroup.MaxLoops, finalDecision, decision.Decision,
+            "Loop controller: group '{GroupId}' pass {Pass}/{MaxLoops} -> {Decision} (eval said {LlmDecision}; {RelevantShare:P0} relevant; vetted {Vetted}, discarded {Discarded} (of which {OutOfWindow} outside window {Start}..{End}){Override}).",
+            context.TopicGroup.Id, pass.Pass, context.TopicGroup.MaxLoops, finalDecision, decision.Decision,
             relevantShare, review.Vetted.Count, review.Discarded.Count, outOfWindow,
             lowerBound?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "-",
             upperBound.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),

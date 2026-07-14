@@ -9,7 +9,7 @@ using AgenticRagScannerApi.Validators;
 using AgenticRagScannerApi.Workflows.Agents;
 using AgenticRagScannerApi.Workflows.Checkpointing;
 using AgenticRagScannerApi.Workflows.Configuration;
-using AgenticRagScannerApi.Workflows.DeloitteView;
+using AgenticRagScannerApi.Workflows.CompanyView;
 using AgenticRagScannerApi.Workflows.Pipeline;
 using AgenticRagScannerApi.Workflows.Steps;
 using AgenticRagScannerApi.Workflows.Tools;
@@ -61,6 +61,7 @@ public static class ServiceCollectionExtensions
         services.AddOptions<AzureSearchOptions>().Bind(configuration.GetSection(AzureSearchOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<FoundryOptions>().Bind(configuration.GetSection(FoundryOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<QuerySynthesisOptions>().Bind(configuration.GetSection(QuerySynthesisOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<CompanyViewOptions>().Bind(configuration.GetSection(CompanyViewOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<CosmosOptions>().Bind(configuration.GetSection(CosmosOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<WebSearchOptions>().Bind(configuration.GetSection(WebSearchOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<FetchOptions>().Bind(configuration.GetSection(FetchOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
@@ -121,10 +122,10 @@ public static class ServiceCollectionExtensions
         // story 8.6). Singleton so the small, static vocabularies are loaded once and cached.
         services.AddSingleton<IRegulatoryVocabularyProvider, CosmosVocabularyProvider>();
 
-        // Prior Deloitte Views source for the Deloitte View agent (Epic 8, story 8.5). CSV-backed for
+        // Prior Company Views source for the Company View agent (Epic 8, story 8.5). CSV-backed for
         // local testing (SQL in production, behind the same abstraction); singleton so the file is parsed
         // once and cached.
-        services.AddSingleton<IPriorDeloitteViewSource, CsvPriorDeloitteViewSource>();
+        services.AddSingleton<IPriorCompanyViewSource, CsvPriorCompanyViewSource>();
 
         // Shared throttle - Phase 0 pass-through; real TPM/RPM/QPS limits arrive later.
         services.AddSingleton<ISharedThrottle, NoOpThrottle>();
@@ -188,7 +189,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEnrichmentAgent, EnrichmentAgentStub>();
         services.AddSingleton<IImpactAreaAgent, ImpactAreaAgent>();
         services.AddSingleton<ITagsAgent, TagsAgent>();
-        services.AddSingleton<IDeloitteViewAgent, DeloitteViewAgent>();
+        services.AddSingleton<ICompanyViewAgent, CompanyViewAgent>();
 
         // Deterministic steps + the allowlist-gated web search agent (canned hits in Epic 2).
         services.AddSingleton<IPreFilterStep, PreFilterStep>();

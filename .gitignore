@@ -69,3 +69,6 @@ appsettings.*.Local.json
 *.userosscache
 *.sln.docstates
 /AgenticRagScannerApi/appsettings.Local.json
+
+# Customer regulatory data (may contain "INTERNAL USE ONLY" content — never commit)
+RegulatoryUpdates.csv

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
+using AgenticRagScannerApi.Workflows.Common;
 using AgenticRagScannerApi.Workflows.Prompts;
 using AgenticRagScannerApi.Workflows.Vocabulary;
 using Microsoft.Agents.AI;
@@ -88,7 +89,7 @@ public sealed class TagsAgent : ITagsAgent
                 TagsPrompt.Version, context.TopicGroup.Id, selected.Count, string.Join(", ", selected), items.Count);
             return selected;
         }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        catch (Exception ex) when (ChatFailure.IsDegradable(ex, cancellationToken))
         {
             _logger.LogWarning(
                 ex,
