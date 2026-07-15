@@ -129,6 +129,20 @@ public class ImpactAreaAgentTests
         result.Should().Be("Employer tax reporting/filing requirements");
     }
 
+    [Fact]
+    public async Task SelectAsync_SingleItem_ReturnsImpactArea_AndGroundsOnFullText()
+    {
+        var chat = new FakeChatClient("""{"impactArea":"Employment taxes rates & thresholds"}""");
+        var agent = CreateAgent(chat);
+        var item = WorkflowTestFactory.Item("https://gov.uk/a", Verdict.Relevant);
+
+        var result = await agent.SelectAsync(item, "SINGLE-ITEM full text about NIC thresholds", WorkflowTestFactory.CreateContext());
+
+        result.Should().Be("Employment taxes rates & thresholds");
+        chat.CallCount.Should().Be(1);
+        chat.LastUserPrompt.Should().Contain("SINGLE-ITEM full text about NIC thresholds");
+    }
+
     private static ImpactAreaAgent CreateAgent(IChatClient chatClient, IReadOnlyList<string>? vocabulary = null) =>
         new(chatClient, new FakeVocabularyProvider(vocabulary ?? Vocabulary), NullLogger<ImpactAreaAgent>.Instance);
 

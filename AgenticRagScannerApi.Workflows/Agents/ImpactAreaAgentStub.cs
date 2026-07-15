@@ -31,4 +31,15 @@ public sealed class ImpactAreaAgentStub : IImpactAreaAgent
 
         return Task.FromResult<string?>(items.Count == 0 ? null : CannedImpactArea);
     }
+
+    public Task<string?> SelectAsync(
+        ResultItem item,
+        string? fullText,
+        TopicGroupContext context,
+        CancellationToken cancellationToken = default)
+        => SelectAsync(
+            [item],
+            new Dictionary<string, string?> { [item.Id] = fullText },
+            context,
+            cancellationToken);
 }

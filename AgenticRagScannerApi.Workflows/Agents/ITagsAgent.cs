@@ -25,4 +25,16 @@ public interface ITagsAgent
         IReadOnlyDictionary<string, string?> fullTextByItemId,
         TopicGroupContext context,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Selects the applicable tags (from the approved vocabulary) for ONE vetted document (Option A:
+    /// per-item categorisation), grounded on that item's <paramref name="fullText"/> snapshot
+    /// (<see langword="null"/> when unavailable). Returns the canonical tags (possibly empty); empty also
+    /// when the vocabulary is empty or the model call failed.
+    /// </summary>
+    Task<IReadOnlyList<string>> SelectAsync(
+        ResultItem item,
+        string? fullText,
+        TopicGroupContext context,
+        CancellationToken cancellationToken = default);
 }

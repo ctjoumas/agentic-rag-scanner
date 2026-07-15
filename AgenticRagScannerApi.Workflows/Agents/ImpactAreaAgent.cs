@@ -107,6 +107,18 @@ public sealed class ImpactAreaAgent : IImpactAreaAgent
         return null;
     }
 
+    /// <inheritdoc />
+    public Task<string?> SelectAsync(
+        ResultItem item,
+        string? fullText,
+        TopicGroupContext context,
+        CancellationToken cancellationToken = default)
+        => SelectAsync(
+            [item],
+            new Dictionary<string, string?> { [item.Id] = fullText },
+            context,
+            cancellationToken);
+
     /// <summary>
     /// Validates the model's choice against the closed set and returns the canonical vocabulary spelling
     /// (case/whitespace-insensitive), or <see langword="null"/> when the value is blank or off-list.

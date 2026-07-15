@@ -47,4 +47,20 @@ public sealed class CompanyViewAgentStub : ICompanyViewAgent
 
         return Task.FromResult<CompanyViewRecord?>(record);
     }
+
+    public Task<CompanyViewRecord?> GenerateAsync(
+        ResultItem item,
+        string? fullText,
+        string? impactArea,
+        IReadOnlyList<string> tags,
+        IReadOnlyList<CompanyViewRecord> priorViews,
+        TopicGroupContext context,
+        CancellationToken cancellationToken = default)
+        => GenerateAsync(
+            [item],
+            new Dictionary<string, string?> { [item.Id] = fullText },
+            impactArea,
+            tags,
+            context,
+            cancellationToken);
 }

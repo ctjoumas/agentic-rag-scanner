@@ -100,6 +100,18 @@ public sealed class TagsAgent : ITagsAgent
         return [];
     }
 
+    /// <inheritdoc />
+    public Task<IReadOnlyList<string>> SelectAsync(
+        ResultItem item,
+        string? fullText,
+        TopicGroupContext context,
+        CancellationToken cancellationToken = default)
+        => SelectAsync(
+            [item],
+            new Dictionary<string, string?> { [item.Id] = fullText },
+            context,
+            cancellationToken);
+
     /// <summary>
     /// Validates each model-selected tag against the controlled vocabulary and returns the canonical
     /// spellings (case/whitespace-insensitive), dropping blanks, off-list values, and duplicates while

@@ -26,4 +26,16 @@ public interface IImpactAreaAgent
         IReadOnlyDictionary<string, string?> fullTextByItemId,
         TopicGroupContext context,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Selects the single best impact area (from the approved vocabulary) for ONE vetted document
+    /// (Option A: per-item categorisation), grounded on that item's <paramref name="fullText"/> snapshot
+    /// (<see langword="null"/> when unavailable). Returns the canonical impact area, or
+    /// <see langword="null"/> when the vocabulary is empty or the model returned an off-list/failed result.
+    /// </summary>
+    Task<string?> SelectAsync(
+        ResultItem item,
+        string? fullText,
+        TopicGroupContext context,
+        CancellationToken cancellationToken = default);
 }

@@ -117,6 +117,20 @@ public class TagsAgentTests
         chat.LastUserPrompt.Should().Contain("NIC-MARKER");
     }
 
+    [Fact]
+    public async Task SelectAsync_SingleItem_ReturnsTags_AndGroundsOnFullText()
+    {
+        var chat = new FakeChatClient("""{"tags":["IR35","Off Payroll"]}""");
+        var agent = CreateAgent(chat);
+        var item = WorkflowTestFactory.Item("https://gov.uk/a", Verdict.Relevant);
+
+        var result = await agent.SelectAsync(item, "SINGLE-ITEM off-payroll working guidance", WorkflowTestFactory.CreateContext());
+
+        result.Should().BeEquivalentTo(new[] { "IR35", "Off Payroll" });
+        chat.CallCount.Should().Be(1);
+        chat.LastUserPrompt.Should().Contain("SINGLE-ITEM off-payroll working guidance");
+    }
+
     private static TagsAgent CreateAgent(IChatClient chatClient, IReadOnlyList<string>? vocabulary = null) =>
         new(chatClient, new FakeVocabularyProvider(vocabulary ?? Vocabulary), NullLogger<TagsAgent>.Instance);
 

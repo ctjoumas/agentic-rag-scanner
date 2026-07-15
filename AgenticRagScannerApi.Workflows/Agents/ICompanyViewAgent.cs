@@ -29,4 +29,19 @@ public interface ICompanyViewAgent
         IReadOnlyList<string> tags,
         TopicGroupContext context,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Produces the Company View record for ONE vetted document (Option A: one per document), grounded on
+    /// that item's <paramref name="fullText"/> snapshot plus its <paramref name="impactArea"/> and
+    /// <paramref name="tags"/>. House-style <paramref name="priorViews"/> exemplars are passed in (fetched
+    /// once per group by the finalize step, already capped) rather than retrieved by the agent.
+    /// </summary>
+    Task<CompanyViewRecord?> GenerateAsync(
+        ResultItem item,
+        string? fullText,
+        string? impactArea,
+        IReadOnlyList<string> tags,
+        IReadOnlyList<CompanyViewRecord> priorViews,
+        TopicGroupContext context,
+        CancellationToken cancellationToken = default);
 }

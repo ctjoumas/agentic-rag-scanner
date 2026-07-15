@@ -86,4 +86,13 @@ public sealed class ResultItem
 
     /// <summary>Source authority tier stamped by the quality gate.</summary>
     public LevelOfAuthority LevelOfAuthority { get; set; }
+
+    // --- per-item Company View (one Company View per vetted document) ---
+
+    /// <summary>
+    /// The Company View produced for this single vetted document. Carries this document's impact area,
+    /// tags, summary, and practitioner advice (<see cref="CompanyViewRecord"/>). Populated in the finalize
+    /// step; <see langword="null"/> until then (and for items that carried no producible view).
+    /// </summary>
+    public CompanyViewRecord? CompanyView { get; set; }
 }

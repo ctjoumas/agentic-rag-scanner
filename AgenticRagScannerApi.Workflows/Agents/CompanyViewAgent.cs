@@ -63,12 +63,49 @@ public sealed class CompanyViewAgent : ICompanyViewAgent
             return null;
         }
 
-        var jurisdiction = context.Run.Jurisdiction;
-        var priorViews = await _priorViews.GetByJurisdictionAsync(jurisdiction, cancellationToken);
+        var priorViews = await _priorViews.GetByJurisdictionAsync(context.Run.Jurisdiction, cancellationToken);
         var exemplars = priorViews.Count > _options.MaxExemplars ? priorViews.Take(_options.MaxExemplars).ToList() : priorViews;
 
-        // The objective fields are aggregated deterministically from the carried items and the group-level
-        // categorization (impact area + tags computed once over all items' full text) so they stay grounded.
+        return await GenerateCoreAsync(items, fullTextByItemId, impactArea, tags, exemplars, context, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<CompanyViewRecord?> GenerateAsync(
+        ResultItem item,
+        string? fullText,
+        string? impactArea,
+        IReadOnlyList<string> tags,
+        IReadOnlyList<CompanyViewRecord> priorViews,
+        TopicGroupContext context,
+        CancellationToken cancellationToken = default)
+        => GenerateCoreAsync(
+            [item],
+            new Dictionary<string, string?> { [item.Id] = fullText },
+            impactArea,
+            tags,
+            priorViews,
+            context,
+            cancellationToken);
+
+    /// <summary>
+    /// Shared body for both the group and single-item overloads: builds the deterministic objective
+    /// fields, grounds the model on the supplied items' full text and the <paramref name="exemplars"/>
+    /// (already fetched/capped by the caller), and overlays the model's judgement fields. A failed/empty
+    /// model call still returns a record populated with the objective fields.
+    /// </summary>
+    private async Task<CompanyViewRecord?> GenerateCoreAsync(
+        IReadOnlyList<ResultItem> items,
+        IReadOnlyDictionary<string, string?> fullTextByItemId,
+        string? impactArea,
+        IReadOnlyList<string> tags,
+        IReadOnlyList<CompanyViewRecord> exemplars,
+        TopicGroupContext context,
+        CancellationToken cancellationToken)
+    {
+        var jurisdiction = context.Run.Jurisdiction;
+
+        // The objective fields are aggregated deterministically from the carried items and the
+        // categorization (impact area + tags) so they stay grounded.
         var record = BuildBaseRecord(items, jurisdiction, impactArea, tags);
 
         var updatesBlock = AggregateContextBuilder.BuildUpdatesBlock(items, fullTextByItemId);

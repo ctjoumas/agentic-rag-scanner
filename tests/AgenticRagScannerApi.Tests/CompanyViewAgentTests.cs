@@ -148,6 +148,34 @@ public class CompanyViewAgentTests
         record.SupportingReference.Should().Contain("https://gov.uk/a");
     }
 
+    [Fact]
+    public async Task GenerateAsync_SingleItem_ProducesRecord_FromPassedInExemplars_WithoutQueryingSource()
+    {
+        var chat = new FakeChatClient(ModelJson);
+        // The single-item overload does NOT use IPriorCompanyViewSource - exemplars are passed in.
+        var source = new FakeSource([]);
+        var agent = CreateAgent(chat, source);
+        var item = Item("https://gov.uk/a");
+        var priorViews = Prior("HOUSE-STYLE-EXEMPLAR advice text");
+
+        var record = await agent.GenerateAsync(
+            item,
+            "SINGLE-ITEM-FULLTEXT about NIC thresholds",
+            "Employment taxes rates & thresholds",
+            ["National Insurance"],
+            priorViews,
+            WorkflowTestFactory.CreateContext());
+
+        record.Should().NotBeNull();
+        record!.CompanyView.Should().Be("Employers should update payroll systems.");
+        record.ImpactArea.Should().Be("Employment taxes rates & thresholds");
+        record.Tags.Should().Contain("National Insurance");
+        record.SupportingReference.Should().Contain("https://gov.uk/a");
+        chat.LastUserPrompt.Should().Contain("SINGLE-ITEM-FULLTEXT about NIC thresholds");
+        chat.LastUserPrompt.Should().Contain("HOUSE-STYLE-EXEMPLAR advice text");
+        source.RequestedJurisdiction.Should().BeNull();
+    }
+
     private static List<CompanyViewRecord> Prior(string view) =>
         [new CompanyViewRecord { TitleOfUpdate = "Prior title", ImpactArea = "Impact area", SummaryOfUpdate = "Prior summary", CompanyView = view }];
 
