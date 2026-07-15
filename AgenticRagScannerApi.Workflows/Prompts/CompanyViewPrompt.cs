@@ -6,17 +6,17 @@ namespace AgenticRagScannerApi.Workflows.Prompts;
 
 /// <summary>
 /// System- and user-prompt builders for the Company View agent (Epic 8, story 8.5). In a single call
-/// the agent produces ONE consolidated record per topic group - both a neutral <c>SummaryOfUpdate</c> and
-/// the practitioner-style <c>CompanyView</c> - grounded on the <em>full text</em> of the group's carried
-/// regulatory updates (plus their impact areas and tags). Prior Company View records (retrieved by
-/// jurisdiction, shaped like the historical CSV) are injected as house-style exemplars that steer the
-/// CompanyView only; the summary does not use them. Versioned via <see cref="Version"/> so eval runs can
-/// attribute output changes to prompt changes (see <c>docs/prompt-management.md</c>).
+/// the agent produces ONE record per vetted document - both a neutral <c>SummaryOfUpdate</c> and the
+/// practitioner-style <c>CompanyView</c> - grounded on the <em>full text</em> of that regulatory document
+/// (plus its impact area and tags). Prior Company View records (passed in by the finalize step, shaped like
+/// the historical CSV) are injected as house-style exemplars that steer the CompanyView only; the summary
+/// does not use them. Versioned via <see cref="Version"/> so eval runs can attribute output changes to prompt
+/// changes (see <c>docs/prompt-management.md</c>).
 /// </summary>
 public static class CompanyViewPrompt
 {
     /// <summary>Prompt version - bump when the instructions change.</summary>
-    public const string Version = "v5";
+    public const string Version = "v6";
 
     /// <summary>Per-exemplar character budget so a few long prior views do not blow the context window.</summary>
     private const int MaxCharsPerExemplarField = 1200;
@@ -30,16 +30,16 @@ public static class CompanyViewPrompt
         var builder = new StringBuilder();
 
         builder.AppendLine(
-            "You are an employment-taxes practitioner producing a single, consolidated \"Company View\" " +
-            "record for a topic group.");
+            "You are an employment-taxes practitioner producing a \"Company View\" record for a single " +
+            "regulatory document.");
         builder.AppendLine(
-            $"A scan surfaced one or more regulatory updates for this topic group in the {jurisdiction} jurisdiction. " +
-            "Aggregate them into ONE record - do not write a separate entry per update.");
+            $"A scan surfaced a regulatory update in the {jurisdiction} jurisdiction. Produce ONE record for " +
+            "THIS document.");
         builder.AppendLine();
         builder.AppendLine("Produce these fields:");
-        builder.AppendLine("- titleOfUpdate: a concise headline capturing the theme common to the group's updates.");
+        builder.AppendLine("- titleOfUpdate: a concise headline capturing the theme of this document.");
         builder.AppendLine(
-            "- summaryOfUpdate: a professional consolidated summary of WHAT CHANGED across the updates (a few sentences).");
+            "- summaryOfUpdate: a professional summary of WHAT CHANGED in this document (a few sentences).");
         builder.AppendLine(
             "- companyView: concise, practical client advice - what the changes mean for employers/clients and the " +
             "concrete actions they should consider. This is the centrepiece.");
@@ -59,11 +59,11 @@ public static class CompanyViewPrompt
             "specific facts.");
         builder.AppendLine(
             "- Write the summaryOfUpdate as a neutral, factual account of WHAT CHANGED, grounded only in the " +
-            "full text of the updates provided below. Do NOT use or style it after the prior-view examples - " +
+            "full text of the document provided below. Do NOT use or style it after the prior-view examples - " +
             "the examples steer the companyView only.");
         builder.AppendLine(
-            "- Ground everything in the updates provided below. Do not copy an example's content or invent facts, " +
-            "figures, dates, or obligations the updates do not support.");
+            "- Ground everything in the document provided below. Do not copy an example's content or invent facts, " +
+            "figures, dates, or obligations the document does not support.");
         builder.AppendLine(
             "- Prose fields are continuous text (no headings, bullet points, markdown, or preamble). Leave a field " +
             "empty rather than guessing.");
@@ -130,7 +130,7 @@ public static class CompanyViewPrompt
             }
         }
 
-        builder.Append("Produce the single consolidated Company View record for this topic group now.");
+        builder.Append("Produce the Company View record for this regulatory document now.");
         return builder.ToString();
     }
 

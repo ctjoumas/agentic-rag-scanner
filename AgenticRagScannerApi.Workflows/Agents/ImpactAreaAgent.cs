@@ -14,12 +14,12 @@ namespace AgenticRagScannerApi.Workflows.Agents;
 /// <summary>
 /// Epic 8 (story 8.2) real implementation of <see cref="IImpactAreaAgent"/>: a MAF
 /// <see cref="ChatClientAgent"/> over the shared Foundry model deployment (<see cref="IChatClient"/>).
-/// It makes a single Structured Outputs call - ONCE per topic group - that picks one impact area from the
-/// approved vocabulary (loaded from Cosmos via <see cref="IRegulatoryVocabularyProvider"/>) for the group
-/// as a whole, grounded on the vetted full-text snapshots of ALL the group's carried updates. The model's
-/// choice is validated against the closed set and normalized to the canonical vocabulary spelling; an
-/// off-list or failed result returns <see langword="null"/> (a wrong single-label guess is worse than
-/// none in a compliance context) and logs a warning.
+/// It makes a single Structured Outputs call - once per vetted document - that picks one impact area from
+/// the approved vocabulary (loaded from Cosmos via <see cref="IRegulatoryVocabularyProvider"/>), grounded
+/// on that document's vetted full-text snapshot. The model's choice is validated against the closed set
+/// and normalized to the canonical vocabulary spelling; an off-list or failed result returns
+/// <see langword="null"/> (a wrong single-label guess is worse than none in a compliance context) and
+/// logs a warning.
 /// </summary>
 public sealed class ImpactAreaAgent : IImpactAreaAgent
 {
@@ -42,7 +42,10 @@ public sealed class ImpactAreaAgent : IImpactAreaAgent
         _logger = logger;
     }
 
-    public async Task<string?> SelectAsync(
+    /// <summary>Core single-label classification over a one-item list; the per-document public overload
+    /// wraps this. Returns the canonical impact area, or null when the vocabulary is empty or the model
+    /// returned an off-list/failed result.</summary>
+    private async Task<string?> SelectAsync(
         IReadOnlyList<ResultItem> items,
         IReadOnlyDictionary<string, string?> fullTextByItemId,
         TopicGroupContext context,

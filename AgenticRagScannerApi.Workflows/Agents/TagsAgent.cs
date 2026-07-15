@@ -14,12 +14,11 @@ namespace AgenticRagScannerApi.Workflows.Agents;
 /// <summary>
 /// Epic 8 (story 8.3) real implementation of <see cref="ITagsAgent"/>: a MAF
 /// <see cref="ChatClientAgent"/> over the shared Foundry model deployment (<see cref="IChatClient"/>).
-/// It makes a single Structured Outputs call - ONCE per topic group, separate from the Impact Area agent
-/// - that selects zero or more tags from the approved vocabulary (loaded from Cosmos via
-/// <see cref="IRegulatoryVocabularyProvider"/>) for the group as a whole, grounded on the vetted
-/// full-text snapshots of ALL the group's carried updates. Each returned tag is validated against the
-/// controlled vocabulary and normalized to its canonical spelling; off-list values are dropped (never
-/// invented) and a failed call returns an empty list.
+/// It makes a single Structured Outputs call - once per vetted document, separate from the Impact Area
+/// agent - that selects zero or more tags from the approved vocabulary (loaded from Cosmos via
+/// <see cref="IRegulatoryVocabularyProvider"/>), grounded on that document's vetted full-text snapshot.
+/// Each returned tag is validated against the controlled vocabulary and normalized to its canonical
+/// spelling; off-list values are dropped (never invented) and a failed call returns an empty list.
 /// </summary>
 public sealed class TagsAgent : ITagsAgent
 {
@@ -42,7 +41,10 @@ public sealed class TagsAgent : ITagsAgent
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<string>> SelectAsync(
+    /// <summary>Core multi-label selection over a one-item list; the per-document public overload wraps
+    /// this. Returns the canonical tags (possibly empty); empty also when the vocabulary is empty or the
+    /// model call failed.</summary>
+    private async Task<IReadOnlyList<string>> SelectAsync(
         IReadOnlyList<ResultItem> items,
         IReadOnlyDictionary<string, string?> fullTextByItemId,
         TopicGroupContext context,

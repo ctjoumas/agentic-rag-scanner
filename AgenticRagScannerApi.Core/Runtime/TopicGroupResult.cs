@@ -21,17 +21,9 @@ public sealed class TopicGroupResult
     /// <summary>Number of loop passes the group executed.</summary>
     public int LoopCount { get; init; }
 
-    /// <summary>Vetted items surfaced for this group (empty for the Phase 1 stub).</summary>
+    /// <summary>Vetted items surfaced for this group (empty for the Phase 1 stub). Each carried item
+    /// carries its own per-document Company View (<see cref="ResultItem.CompanyView"/>).</summary>
     public IReadOnlyList<ResultItem> Items { get; init; } = [];
-
-    /// <summary>
-    /// The Company View for this topic group (Epic 8, story 8.5): a single record - shaped to match the
-    /// historical <c>RegulatoryUpdatesCsv</c> (<see cref="CompanyViewRecord"/>) - that <em>aggregates</em>
-    /// the group's carried regulatory updates (their summaries, impact areas, and tags) into one
-    /// practitioner Company View, grounded in the topic group and steered by prior Company Views for the
-    /// run's jurisdiction. Null when the group carried no items.
-    /// </summary>
-    public CompanyViewRecord? CompanyView { get; set; }
 
     /// <summary>
     /// Full per-pass history of the agentic RAG loop for this group: each pass's query and rationale,

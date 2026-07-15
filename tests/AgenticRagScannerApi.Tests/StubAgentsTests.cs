@@ -44,11 +44,10 @@ public class StubAgentsTests
     {
         var context = WorkflowTestFactory.CreateContext();
         var item = WorkflowTestFactory.Item("https://gov.uk/a", Verdict.Relevant);
-        var fullText = new Dictionary<string, string?> { [item.Id] = "full text" };
 
         await new EnrichmentAgentStub(NullLogger<EnrichmentAgentStub>.Instance).EnrichAsync(item, context);
-        var impactArea = await new ImpactAreaAgentStub(NullLogger<ImpactAreaAgentStub>.Instance).SelectAsync([item], fullText, context);
-        var tags = await new TagsAgentStub(NullLogger<TagsAgentStub>.Instance).SelectAsync([item], fullText, context);
+        var impactArea = await new ImpactAreaAgentStub(NullLogger<ImpactAreaAgentStub>.Instance).SelectAsync(item, "full text", context);
+        var tags = await new TagsAgentStub(NullLogger<TagsAgentStub>.Instance).SelectAsync(item, "full text", context);
 
         item.WhatItDoes.Should().NotBeNullOrWhiteSpace();
         impactArea.Should().NotBeNullOrWhiteSpace();

@@ -19,7 +19,7 @@ public sealed class TagsAgentStub : ITagsAgent
 
     public TagsAgentStub(ILogger<TagsAgentStub> logger) => _logger = logger;
 
-    public Task<IReadOnlyList<string>> SelectAsync(
+    private Task<IReadOnlyList<string>> SelectAsync(
         IReadOnlyList<ResultItem> items,
         IReadOnlyDictionary<string, string?> fullTextByItemId,
         TopicGroupContext context,

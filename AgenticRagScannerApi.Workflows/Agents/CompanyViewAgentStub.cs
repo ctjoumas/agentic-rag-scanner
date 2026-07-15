@@ -17,7 +17,7 @@ public sealed class CompanyViewAgentStub : ICompanyViewAgent
 
     public CompanyViewAgentStub(ILogger<CompanyViewAgentStub> logger) => _logger = logger;
 
-    public Task<CompanyViewRecord?> GenerateAsync(
+    private Task<CompanyViewRecord?> GenerateAsync(
         IReadOnlyList<ResultItem> items,
         IReadOnlyDictionary<string, string?> fullTextByItemId,
         string? impactArea,

@@ -19,7 +19,7 @@ public sealed class ImpactAreaAgentStub : IImpactAreaAgent
 
     public ImpactAreaAgentStub(ILogger<ImpactAreaAgentStub> logger) => _logger = logger;
 
-    public Task<string?> SelectAsync(
+    private Task<string?> SelectAsync(
         IReadOnlyList<ResultItem> items,
         IReadOnlyDictionary<string, string?> fullTextByItemId,
         TopicGroupContext context,

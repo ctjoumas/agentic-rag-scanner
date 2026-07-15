@@ -9,10 +9,9 @@ namespace AgenticRagScannerApi.Tests;
 
 /// <summary>
 /// Story 8.2 - the real Impact Area MAF agent over a fake <see cref="IChatClient"/> (no network). It runs
-/// ONCE per topic group and picks a single impact area across all the group's vetted updates. Covers
-/// Structured Outputs deserialization, closed-set validation + canonical normalization, grounding on the
-/// vetted full text, and safe degradation (off-list / failed / empty-vocabulary) that returns null rather
-/// than guessing.
+/// once per vetted document and picks a single impact area for that document. Covers Structured Outputs
+/// deserialization, closed-set validation + canonical normalization, grounding on the vetted full text,
+/// and safe degradation (off-list / failed / empty-vocabulary) that returns null rather than guessing.
 /// </summary>
 public class ImpactAreaAgentTests
 {
@@ -23,21 +22,16 @@ public class ImpactAreaAgentTests
         "Employment taxes rates & thresholds",
     ];
 
-    /// <summary>One carried item plus its full-text map, as the finalize step passes them in.</summary>
-    private static (IReadOnlyList<ResultItem> Items, IReadOnlyDictionary<string, string?> FullText) Group(string? fullText)
-    {
-        var item = WorkflowTestFactory.Item("https://gov.uk/a", Verdict.Relevant);
-        return ([item], new Dictionary<string, string?> { [item.Id] = fullText });
-    }
+    /// <summary>One vetted document, as the finalize step passes it in.</summary>
+    private static ResultItem Item() => WorkflowTestFactory.Item("https://gov.uk/a", Verdict.Relevant);
 
     [Fact]
     public async Task SelectAsync_ReturnsImpactArea_WhenModelReturnsApprovedValue()
     {
         var chat = new FakeChatClient("""{"impactArea":"Employment taxes rates & thresholds","rationale":"changes NIC thresholds"}""");
         var agent = CreateAgent(chat);
-        var (items, fullText) = Group("full text about NIC thresholds");
 
-        var result = await agent.SelectAsync(items, fullText, WorkflowTestFactory.CreateContext());
+        var result = await agent.SelectAsync(Item(), "full text about NIC thresholds", WorkflowTestFactory.CreateContext());
 
         result.Should().Be("Employment taxes rates & thresholds");
         chat.CallCount.Should().Be(1);
@@ -48,9 +42,8 @@ public class ImpactAreaAgentTests
     {
         var chat = new FakeChatClient("""{"impactArea":"  employment taxes rates & THRESHOLDS  "}""");
         var agent = CreateAgent(chat);
-        var (items, fullText) = Group("text");
 
-        var result = await agent.SelectAsync(items, fullText, WorkflowTestFactory.CreateContext());
+        var result = await agent.SelectAsync(Item(), "text", WorkflowTestFactory.CreateContext());
 
         result.Should().Be("Employment taxes rates & thresholds");
     }
@@ -60,9 +53,8 @@ public class ImpactAreaAgentTests
     {
         var chat = new FakeChatClient("""{"impactArea":"Something invented"}""");
         var agent = CreateAgent(chat);
-        var (items, fullText) = Group("text");
 
-        var result = await agent.SelectAsync(items, fullText, WorkflowTestFactory.CreateContext());
+        var result = await agent.SelectAsync(Item(), "text", WorkflowTestFactory.CreateContext());
 
         result.Should().BeNull();
     }
@@ -72,21 +64,8 @@ public class ImpactAreaAgentTests
     {
         var chat = new FakeChatClient("""{"impactArea":"Employment taxes rates & thresholds"}""");
         var agent = CreateAgent(chat, vocabulary: []);
-        var (items, fullText) = Group("text");
 
-        var result = await agent.SelectAsync(items, fullText, WorkflowTestFactory.CreateContext());
-
-        result.Should().BeNull();
-        chat.CallCount.Should().Be(0);
-    }
-
-    [Fact]
-    public async Task SelectAsync_ReturnsNull_AndSkipsModel_WhenNoItems()
-    {
-        var chat = new FakeChatClient("""{"impactArea":"Employment taxes rates & thresholds"}""");
-        var agent = CreateAgent(chat);
-
-        var result = await agent.SelectAsync([], new Dictionary<string, string?>(), WorkflowTestFactory.CreateContext());
+        var result = await agent.SelectAsync(Item(), "text", WorkflowTestFactory.CreateContext());
 
         result.Should().BeNull();
         chat.CallCount.Should().Be(0);
@@ -97,9 +76,8 @@ public class ImpactAreaAgentTests
     {
         var chat = new FakeChatClient("not json at all");
         var agent = CreateAgent(chat);
-        var (items, fullText) = Group("text");
 
-        var result = await agent.SelectAsync(items, fullText, WorkflowTestFactory.CreateContext());
+        var result = await agent.SelectAsync(Item(), "text", WorkflowTestFactory.CreateContext());
 
         result.Should().BeNull();
     }
@@ -109,9 +87,8 @@ public class ImpactAreaAgentTests
     {
         var chat = new FakeChatClient("""{"impactArea":"Taxation of equity & incentives"}""");
         var agent = CreateAgent(chat);
-        var (items, fullText) = Group("SHARE-SCHEME-MARKER employee equity guidance");
 
-        await agent.SelectAsync(items, fullText, WorkflowTestFactory.CreateContext());
+        await agent.SelectAsync(Item(), "SHARE-SCHEME-MARKER employee equity guidance", WorkflowTestFactory.CreateContext());
 
         chat.LastUserPrompt.Should().Contain("SHARE-SCHEME-MARKER");
     }
@@ -121,26 +98,11 @@ public class ImpactAreaAgentTests
     {
         var chat = new FakeChatClient("""{"impactArea":"Employer tax reporting/filing requirements"}""");
         var agent = CreateAgent(chat);
-        var (items, fullText) = Group(fullText: null);
 
-        var result = await agent.SelectAsync(items, fullText, WorkflowTestFactory.CreateContext());
+        var result = await agent.SelectAsync(Item(), fullText: null, WorkflowTestFactory.CreateContext());
 
         chat.LastUserPrompt.Should().Contain("unavailable");
         result.Should().Be("Employer tax reporting/filing requirements");
-    }
-
-    [Fact]
-    public async Task SelectAsync_SingleItem_ReturnsImpactArea_AndGroundsOnFullText()
-    {
-        var chat = new FakeChatClient("""{"impactArea":"Employment taxes rates & thresholds"}""");
-        var agent = CreateAgent(chat);
-        var item = WorkflowTestFactory.Item("https://gov.uk/a", Verdict.Relevant);
-
-        var result = await agent.SelectAsync(item, "SINGLE-ITEM full text about NIC thresholds", WorkflowTestFactory.CreateContext());
-
-        result.Should().Be("Employment taxes rates & thresholds");
-        chat.CallCount.Should().Be(1);
-        chat.LastUserPrompt.Should().Contain("SINGLE-ITEM full text about NIC thresholds");
     }
 
     private static ImpactAreaAgent CreateAgent(IChatClient chatClient, IReadOnlyList<string>? vocabulary = null) =>
