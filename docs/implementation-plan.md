@@ -545,6 +545,10 @@ threading and keep the early phases focused on the core RAG loop.
 **Tasks**
 - [ ] **(L1)** Replace the sequential run loop (Phase 1) with `Task.WhenAll` gated by the shared
   throttle; **cap active workers**; preserve per-group isolation (one group failing does not abort the run).
+- [ ] **(L1/L2)** Parallelise the **per-item** finalize fan-out (per-document Company View). The
+  `FinalizeExecutor` loop that produces one Company View per vetted document runs **sequentially** today
+  (see `docs/company-view-per-doc-implementation-plan.md` §3.4b); convert it to a throttle-gated
+  `Task.WhenAll` over items, alongside the per-group parallelisation.
 - [ ] **(L1)** Per-group cancellation still honored under parallel execution; partial results preserved.
 - [ ] **(L3)** Concurrency telemetry: in-flight concurrency gauge + throttle wait-time metric; parallel spans per run/group.
 - [ ] **(L1)** Load/throttle tuning under parallel load: stay within TPM/RPM/QPS with N groups in flight; backpressure verified; per-group cap documented.
