@@ -4,12 +4,12 @@ using AgenticRagScannerApi.Core.Contracts;
 namespace AgenticRagScannerApi.Workflows.Prompts;
 
 /// <summary>
-/// Renders the topic group's carried regulatory updates (source URL, effective-date-aware dates, and the
-/// vetted full-text snapshot) into a single block that is shared verbatim by the group-level Impact Area,
-/// Tags, and Company View prompts. Building it once - with a <em>group-wide</em> full-text budget spread
-/// across the items rather than a fixed per-item cap - keeps the three calls grounded on exactly the same
-/// context, avoids re-clipping the same text three times, and bounds the aggregate token cost regardless
-/// of how many updates a group carried.
+/// Renders a vetted regulatory document (source URL, effective-date-aware dates, and the vetted full-text
+/// snapshot) into a block shared verbatim by the per-document Impact Area, Tags, and Company View prompts
+/// for that document. Building it once per document keeps the three calls grounded on exactly the same
+/// context and avoids re-clipping the same text three times. The head of a regulatory page carries the
+/// title, dates, and substance, so head-truncating to the budget is acceptable for classification and
+/// summarization.
 /// </summary>
 internal static class AggregateContextBuilder
 {
@@ -35,7 +35,7 @@ internal static class AggregateContextBuilder
         var perItemBudget = Math.Max(MinCharsPerItem, totalFullTextBudget / Math.Max(1, items.Count));
 
         var builder = new StringBuilder();
-        builder.AppendLine($"=== Regulatory updates found for this topic group ({items.Count}) - consider ALL of them ===");
+        builder.AppendLine("=== Regulatory document under review (full text below) ===");
 
         var index = 1;
         foreach (var item in items)

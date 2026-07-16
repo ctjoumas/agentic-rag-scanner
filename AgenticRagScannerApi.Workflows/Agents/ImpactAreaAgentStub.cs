@@ -19,7 +19,7 @@ public sealed class ImpactAreaAgentStub : IImpactAreaAgent
 
     public ImpactAreaAgentStub(ILogger<ImpactAreaAgentStub> logger) => _logger = logger;
 
-    public Task<string?> SelectAsync(
+    private Task<string?> SelectAsync(
         IReadOnlyList<ResultItem> items,
         IReadOnlyDictionary<string, string?> fullTextByItemId,
         TopicGroupContext context,
@@ -31,4 +31,15 @@ public sealed class ImpactAreaAgentStub : IImpactAreaAgent
 
         return Task.FromResult<string?>(items.Count == 0 ? null : CannedImpactArea);
     }
+
+    public Task<string?> SelectAsync(
+        ResultItem item,
+        string? fullText,
+        TopicGroupContext context,
+        CancellationToken cancellationToken = default)
+        => SelectAsync(
+            [item],
+            new Dictionary<string, string?> { [item.Id] = fullText },
+            context,
+            cancellationToken);
 }

@@ -2,6 +2,7 @@ using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
 using AgenticRagScannerApi.Workflows;
 using AgenticRagScannerApi.Workflows.Agents;
+using AgenticRagScannerApi.Workflows.CompanyView;
 using AgenticRagScannerApi.Workflows.Configuration;
 using AgenticRagScannerApi.Workflows.Pipeline;
 using AgenticRagScannerApi.Workflows.Steps;
@@ -106,6 +107,8 @@ internal static class WorkflowTestFactory
         services.AddSingleton<IImpactAreaAgent>(sp => new ImpactAreaAgentStub(sp.GetRequiredService<ILogger<ImpactAreaAgentStub>>()));
         services.AddSingleton<ITagsAgent>(sp => new TagsAgentStub(sp.GetRequiredService<ILogger<TagsAgentStub>>()));
         services.AddSingleton<ICompanyViewAgent>(sp => new CompanyViewAgentStub(sp.GetRequiredService<ILogger<CompanyViewAgentStub>>()));
+        services.AddSingleton<IPriorCompanyViewSource, StubPriorCompanyViewSource>();
+        services.AddSingleton(Options.Create(new CompanyViewOptions()));
 
         return services.BuildServiceProvider();
     }
@@ -202,6 +205,16 @@ internal sealed class FailingWebSearchAgent : IWebSearchAgent
 {
     public Task<WebSearchResult> SearchAsync(string query, RunContext run, CancellationToken cancellationToken = default) =>
         Task.FromResult(WebSearchResult.Failure("Web search timed out after the configured per-request timeout."));
+}
+
+/// <summary>
+/// Offline <see cref="IPriorCompanyViewSource"/> for the pipeline tests: returns no prior exemplars, so
+/// the finalize chain's per-item Company View runs without any retrieval dependency.
+/// </summary>
+internal sealed class StubPriorCompanyViewSource : IPriorCompanyViewSource
+{
+    public Task<IReadOnlyList<CompanyViewRecord>> GetByJurisdictionAsync(string jurisdiction, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<CompanyViewRecord>>([]);
 }
 
 /// <summary>

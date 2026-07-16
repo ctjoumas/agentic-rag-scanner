@@ -4,17 +4,16 @@ using AgenticRagScannerApi.Core.Runtime;
 namespace AgenticRagScannerApi.Workflows.Prompts;
 
 /// <summary>
-/// System- and user-prompt builders for the Impact Area agent (Epic 8, story 8.2). It runs ONCE per
-/// topic group and assigns the single best impact area across ALL the group's vetted regulatory updates
-/// (not per item). The approved impact-area vocabulary is injected (loaded from Cosmos RegDocs at
-/// runtime) rather than hardcoded, so the closed set can be re-seeded without a prompt change. Versioned
-/// via <see cref="Version"/> so eval runs can attribute output changes to prompt changes (see
-/// <c>docs/prompt-management.md</c>).
+/// System- and user-prompt builders for the Impact Area agent (Epic 8, story 8.2). It runs once per
+/// vetted document and assigns the single best impact area for THAT document. The approved impact-area
+/// vocabulary is injected (loaded from Cosmos RegDocs at runtime) rather than hardcoded, so the closed
+/// set can be re-seeded without a prompt change. Versioned via <see cref="Version"/> so eval runs can
+/// attribute output changes to prompt changes (see <c>docs/prompt-management.md</c>).
 /// </summary>
 public static class ImpactAreaPrompt
 {
     /// <summary>Prompt version - bump when the instructions change.</summary>
-    public const string Version = "v2";
+    public const string Version = "v3";
 
     /// <summary>
     /// Builds the system prompt: role, the closed impact-area set, and the single-label rule. The JSON
@@ -27,19 +26,18 @@ public static class ImpactAreaPrompt
         builder.AppendLine(
             "You are a categorization assistant for an employment-taxes regulatory horizon-scanning system.");
         builder.AppendLine(
-            $"A scan surfaced one or more regulatory updates for a single topic group in the {jurisdiction} " +
-            "jurisdiction. Assign the SINGLE most appropriate impact area for the topic group as a whole, " +
-            "considering all of the updates together.");
+            $"A scan surfaced a regulatory update in the {jurisdiction} jurisdiction. Assign the SINGLE most " +
+            "appropriate impact area for THIS regulatory document.");
         builder.AppendLine();
         builder.AppendLine("Rules:");
         builder.AppendLine(
             "- Choose EXACTLY ONE impact area, and ONLY from the approved list below. This is a closed set - " +
             "do not invent, merge, reword, or abbreviate an option. Return the chosen option's text verbatim.");
         builder.AppendLine(
-            "- Base the decision on the substance of the updates (what the changes actually do), grounded in the " +
-            "provided full text where available; fall back to the titles/URLs and relevance notes when it is not.");
+            "- Base the decision on the substance of the update (what the change actually does), grounded in the " +
+            "provided full text where available; fall back to the title/URL and relevance notes when it is not.");
         builder.AppendLine(
-            "- If the updates span several areas, pick the one that best captures the group's primary effect. " +
+            "- If the document touches several areas, pick the one that best captures its primary effect. " +
             "Always return one - never leave it blank and never return more than one.");
         builder.AppendLine(
             "- Give a one-sentence rationale (max ~30 words) for the choice - recorded for observability, not shown to end users.");
@@ -62,7 +60,7 @@ public static class ImpactAreaPrompt
         builder.AppendLine($"Jurisdiction: {context.Run.Jurisdiction}");
         builder.AppendLine();
         builder.AppendLine(updatesBlock);
-        builder.Append("Return the single best impact area for this topic group (verbatim from the approved list) with a one-sentence rationale.");
+        builder.Append("Return the single best impact area for this regulatory document (verbatim from the approved list) with a one-sentence rationale.");
         return builder.ToString();
     }
 }

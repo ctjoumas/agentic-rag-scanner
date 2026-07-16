@@ -1,10 +1,13 @@
 using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
 using AgenticRagScannerApi.Workflows.Agents;
+using AgenticRagScannerApi.Workflows.CompanyView;
+using AgenticRagScannerApi.Workflows.Configuration;
 using AgenticRagScannerApi.Workflows.Pipeline;
 using AgenticRagScannerApi.Workflows.Steps;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AgenticRagScannerApi.Workflows.Executors;
 
@@ -12,11 +15,10 @@ namespace AgenticRagScannerApi.Workflows.Executors;
 /// Step 7 of the seven-executor decomposition: the loop's terminal tail. Reached only via the
 /// <see cref="LoopControllerExecutor"/> <c>Finalize</c> conditional edge. Routes the vetted verdicts
 /// (<see cref="IVerdictRouting"/>), reads back each carried item's vetted full-text snapshot, runs the
-/// per-item enrichment step over the carried items, then categorizes the group as a whole - one Impact
-/// Area call and one Tags call, each grounded on ALL the carried items' full text - and generates one
-/// aggregate Company View record for the group (a single call that produces both the neutral summary and
-/// the Company View, grounded on each item's full text plus the group-level impact area and tags), and
-/// yields the aggregated <see cref="TopicGroupResult"/> as the workflow output.
+/// per-item enrichment step over the carried items, then categorizes EACH vetted document individually -
+/// its own Impact Area, Tags, and Company View, produced from that document's own full text. The
+/// jurisdiction-scoped prior Company View exemplars are fetched once per group and passed into every
+/// item's call. Yields the aggregated <see cref="TopicGroupResult"/> as the workflow output.
 /// </summary>
 /// <remarks>
 /// Single input (<see cref="Review"/> - its arrival is the "loop is done" signal; its fields are not
@@ -34,6 +36,8 @@ public sealed class FinalizeExecutor : Executor<Review>
     private readonly IImpactAreaAgent _impactArea;
     private readonly ITagsAgent _tags;
     private readonly ICompanyViewAgent _companyView;
+    private readonly IPriorCompanyViewSource _priorViews;
+    private readonly CompanyViewOptions _companyViewOptions;
     private readonly IFullTextStore _fullTextStore;
     private readonly ILogger<FinalizeExecutor> _logger;
 
@@ -44,6 +48,8 @@ public sealed class FinalizeExecutor : Executor<Review>
         IImpactAreaAgent impactArea,
         ITagsAgent tags,
         ICompanyViewAgent companyView,
+        IPriorCompanyViewSource priorViews,
+        IOptions<CompanyViewOptions> companyViewOptions,
         IFullTextStore fullTextStore,
         ILogger<FinalizeExecutor> logger)
         : base($"finalize-{context.TopicGroup.Id}")
@@ -54,6 +60,8 @@ public sealed class FinalizeExecutor : Executor<Review>
         _impactArea = impactArea;
         _tags = tags;
         _companyView = companyView;
+        _priorViews = priorViews;
+        _companyViewOptions = companyViewOptions.Value;
         _fullTextStore = fullTextStore;
         _logger = logger;
     }
@@ -76,24 +84,35 @@ public sealed class FinalizeExecutor : Executor<Review>
             await _enrichment.EnrichAsync(item, _context, cancellationToken);
         }
 
-        // Categorize the group as a whole (Epic 8, stories 8.2/8.3): one Impact Area call (single-label)
-        // and one Tags call (multi-label), each grounded on ALL the carried items' full text rather than
-        // per item. They are independent, so run them concurrently. Skipped when the group carried nothing.
-        string? impactArea = null;
-        IReadOnlyList<string> tags = [];
+        // Categorize EACH vetted document individually: its own Impact Area (single-label), Tags (multi-label),
+        // and Company View, each grounded on THAT document's own full text. The prior Company View exemplars
+        // are jurisdiction-scoped, so they are fetched ONCE per group and passed into every item's call (see
+        // docs/company-view-per-doc-implementation-plan.md §3.4a). Items are processed sequentially for now;
+        // per-item fan-out under the shared throttle is deferred to Phase 13. Skipped entirely when the group
+        // carried nothing.
         if (carried.Count > 0)
         {
-            var impactAreaTask = _impactArea.SelectAsync(carried, fullTextByItemId, _context, cancellationToken);
-            var tagsTask = _tags.SelectAsync(carried, fullTextByItemId, _context, cancellationToken);
-            await Task.WhenAll(impactAreaTask, tagsTask);
-            impactArea = await impactAreaTask;
-            tags = await tagsTask;
-        }
+            var priorViews = await _priorViews.GetByJurisdictionAsync(_context.Run.Jurisdiction, cancellationToken);
+            var exemplars = priorViews.Count > _companyViewOptions.MaxExemplars
+                ? priorViews.Take(_companyViewOptions.MaxExemplars).ToList()
+                : priorViews;
 
-        // Aggregate: one Company View record per topic group in a single call - both the neutral summary
-        // and the Company View, grounded on each item's full text plus the group-level impact area and
-        // tags (null when the group carried nothing).
-        var companyView = await _companyView.GenerateAsync(carried, fullTextByItemId, impactArea, tags, _context, cancellationToken);
+            foreach (var item in carried)
+            {
+                var fullText = fullTextByItemId[item.Id];
+
+                // Impact area and tags are independent, so run them concurrently; the Company View then
+                // grounds on the item's full text plus its own impact area and tags.
+                var impactAreaTask = _impactArea.SelectAsync(item, fullText, _context, cancellationToken);
+                var tagsTask = _tags.SelectAsync(item, fullText, _context, cancellationToken);
+                await Task.WhenAll(impactAreaTask, tagsTask);
+                var impactArea = await impactAreaTask;
+                var tags = await tagsTask;
+
+                item.CompanyView = await _companyView.GenerateAsync(
+                    item, fullText, impactArea, tags, exemplars, _context, cancellationToken);
+            }
+        }
 
         // A group that carried nothing *because* its final web search failed (timeout/error) is not a clean
         // empty scan - report it as Failed so the caller can distinguish "search worked, found nothing" from
@@ -110,7 +129,6 @@ public sealed class FinalizeExecutor : Executor<Review>
             Status = status,
             LoopCount = _context.LoopCount,
             Items = carried,
-            CompanyView = companyView,
             History = SearchHistorySerializer.ToSnapshot(_context.History),
         };
 

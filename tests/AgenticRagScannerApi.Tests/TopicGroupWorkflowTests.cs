@@ -92,11 +92,12 @@ public class TopicGroupWorkflowTests
         result.Items.Should().OnlyContain(i => i.Verdict == Verdict.Relevant || i.Verdict == Verdict.Borderline);
         result.Items.Should().OnlyContain(i => i.WhatItDoes != null);
 
-        // Impact area and tags are group-level (story 8.2/8.3), set on the aggregate Company View - not
-        // per item. The Company View is a single group-level aggregate (story 8.5).
-        result.CompanyView.Should().NotBeNull();
-        result.CompanyView!.CompanyView.Should().NotBeNullOrWhiteSpace();
-        result.CompanyView.ImpactArea.Should().NotBeNullOrWhiteSpace();
-        result.CompanyView.Tags.Should().NotBeEmpty();
+        // Impact area, tags, and the Company View are produced PER vetted document - each item carries
+        // its own Company View record (with its own impact area + tags). There is no group-level Company
+        // View any more.
+        result.Items.Should().OnlyContain(i => i.CompanyView != null);
+        result.Items.Should().OnlyContain(i => !string.IsNullOrWhiteSpace(i.CompanyView!.CompanyView));
+        result.Items.Should().OnlyContain(i => !string.IsNullOrWhiteSpace(i.CompanyView!.ImpactArea));
+        result.Items.Should().OnlyContain(i => i.CompanyView!.Tags.Count > 0);
     }
 }

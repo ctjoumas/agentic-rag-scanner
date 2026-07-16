@@ -19,7 +19,7 @@ public sealed class TagsAgentStub : ITagsAgent
 
     public TagsAgentStub(ILogger<TagsAgentStub> logger) => _logger = logger;
 
-    public Task<IReadOnlyList<string>> SelectAsync(
+    private Task<IReadOnlyList<string>> SelectAsync(
         IReadOnlyList<ResultItem> items,
         IReadOnlyDictionary<string, string?> fullTextByItemId,
         TopicGroupContext context,
@@ -31,4 +31,15 @@ public sealed class TagsAgentStub : ITagsAgent
 
         return Task.FromResult<IReadOnlyList<string>>(items.Count == 0 ? [] : CannedTags);
     }
+
+    public Task<IReadOnlyList<string>> SelectAsync(
+        ResultItem item,
+        string? fullText,
+        TopicGroupContext context,
+        CancellationToken cancellationToken = default)
+        => SelectAsync(
+            [item],
+            new Dictionary<string, string?> { [item.Id] = fullText },
+            context,
+            cancellationToken);
 }

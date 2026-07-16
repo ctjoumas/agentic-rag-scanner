@@ -5,7 +5,6 @@ using AgenticRagScannerApi.Core.Contracts;
 using AgenticRagScannerApi.Core.Runtime;
 using AgenticRagScannerApi.Workflows.Common;
 using AgenticRagScannerApi.Workflows.Configuration;
-using AgenticRagScannerApi.Workflows.CompanyView;
 using AgenticRagScannerApi.Workflows.Prompts;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -17,58 +16,69 @@ namespace AgenticRagScannerApi.Workflows.Agents;
 /// <summary>
 /// Epic 8 (story 8.5) real implementation of <see cref="ICompanyViewAgent"/>: a MAF
 /// <see cref="ChatClientAgent"/> over the shared Foundry model deployment (<see cref="IChatClient"/>).
-/// In a SINGLE Structured-Outputs call it produces ONE consolidated <see cref="CompanyViewRecord"/> for
-/// a topic group - both a neutral <c>SummaryOfUpdate</c> of what changed AND the practitioner-style
-/// <c>CompanyView</c> advice - grounded on the <em>full text</em> of the group's carried updates. Prior
-/// Company View records for the run's jurisdiction (<see cref="IPriorCompanyViewSource"/>) are injected
-/// as house-style exemplars that steer the CompanyView only; the summary is grounded purely in the full
-/// text and does not use them. The objective fields (jurisdiction, tags, impact areas, dates, supporting
-/// references) are filled deterministically from the carried items so they stay grounded. A failed/empty
-/// call still returns a record populated with the objective fields.
+/// In a SINGLE Structured Output call it produces ONE <see cref="CompanyViewRecord"/> for a single
+/// vetted document - both a neutral <c>SummaryOfUpdate</c> of what changed AND the practitioner-style
+/// <c>CompanyView</c> advice - grounded on that document's <em>full text</em>. Prior Company View exemplars
+/// for the run's jurisdiction are passed in by the finalize step (fetched once per group) and steer the
+/// CompanyView only; the summary is grounded purely in the full text and does not use them. The objective
+/// fields (jurisdiction, tags, impact area, dates, supporting reference) are filled deterministically from
+/// the item so they stay grounded. A failed/empty call still returns a record populated with the objective fields.
 /// </summary>
 public sealed class CompanyViewAgent : ICompanyViewAgent
 {
     private static readonly JsonSerializerOptions s_jsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IChatClient _chatClient;
-    private readonly IPriorCompanyViewSource _priorViews;
     private readonly CompanyViewOptions _options;
     private readonly ILogger<CompanyViewAgent> _logger;
 
     public CompanyViewAgent(
         IChatClient chatClient,
-        IPriorCompanyViewSource priorViews,
         IOptions<CompanyViewOptions> options,
         ILogger<CompanyViewAgent> logger)
     {
         _chatClient = chatClient;
-        _priorViews = priorViews;
         _options = options.Value;
         _logger = logger;
     }
 
-    public async Task<CompanyViewRecord?> GenerateAsync(
+    /// <inheritdoc />
+    public Task<CompanyViewRecord?> GenerateAsync(
+        ResultItem item,
+        string? fullText,
+        string? impactArea,
+        IReadOnlyList<string> tags,
+        IReadOnlyList<CompanyViewRecord> priorViews,
+        TopicGroupContext context,
+        CancellationToken cancellationToken = default)
+        => GenerateCoreAsync(
+            [item],
+            new Dictionary<string, string?> { [item.Id] = fullText },
+            impactArea,
+            tags,
+            priorViews,
+            context,
+            cancellationToken);
+
+    /// <summary>
+    /// Shared body for both the group and single-item overloads: builds the deterministic objective
+    /// fields, grounds the model on the supplied items' full text and the <paramref name="exemplars"/>
+    /// (already fetched/capped by the caller), and overlays the model's judgement fields. A failed/empty
+    /// model call still returns a record populated with the objective fields.
+    /// </summary>
+    private async Task<CompanyViewRecord?> GenerateCoreAsync(
         IReadOnlyList<ResultItem> items,
         IReadOnlyDictionary<string, string?> fullTextByItemId,
         string? impactArea,
         IReadOnlyList<string> tags,
+        IReadOnlyList<CompanyViewRecord> exemplars,
         TopicGroupContext context,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
-        if (items.Count == 0)
-        {
-            _logger.LogInformation(
-                "CompanyView ({PromptVersion}) for group '{GroupId}': no carried items; skipping.",
-                CompanyViewPrompt.Version, context.TopicGroup.Id);
-            return null;
-        }
-
         var jurisdiction = context.Run.Jurisdiction;
-        var priorViews = await _priorViews.GetByJurisdictionAsync(jurisdiction, cancellationToken);
-        var exemplars = priorViews.Count > _options.MaxExemplars ? priorViews.Take(_options.MaxExemplars).ToList() : priorViews;
 
-        // The objective fields are aggregated deterministically from the carried items and the group-level
-        // categorization (impact area + tags computed once over all items' full text) so they stay grounded.
+        // The objective fields are aggregated deterministically from the carried items and the
+        // categorization (impact area + tags) so they stay grounded.
         var record = BuildBaseRecord(items, jurisdiction, impactArea, tags);
 
         var updatesBlock = AggregateContextBuilder.BuildUpdatesBlock(items, fullTextByItemId);

@@ -68,22 +68,20 @@ public sealed class ResultItem
     /// <summary>Confidence in the extracted dates.</summary>
     public DateConfidence DateConfidence { get; set; }
 
-    // --- enrich / categorize ---
+    // --- enrich ---
 
     /// <summary>Plain-English "what it does" summary (enrichment).</summary>
     public string? WhatItDoes { get; set; }
-
-    /// <summary>Impact area (categorize).</summary>
-    public string? ImpactArea { get; set; }
-
-    /// <summary>Regulator (categorize).</summary>
-    public string? Regulator { get; set; }
-
-    /// <summary>Approved tags only (controlled vocabulary).</summary>
-    public IReadOnlyList<string> Tags { get; set; } = [];
 
     // --- quality gate ---
 
     /// <summary>Source authority tier stamped by the quality gate.</summary>
     public LevelOfAuthority LevelOfAuthority { get; set; }
+
+    /// <summary>
+    /// The Company View produced for this single vetted document. Carries this document's impact area,
+    /// tags, summary, and practitioner advice (<see cref="CompanyViewRecord"/>). Populated in the finalize
+    /// step; <see langword="null"/> until then (and for items that carried no producible view).
+    /// </summary>
+    public CompanyViewRecord? CompanyView { get; set; }
 }
