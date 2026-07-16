@@ -47,14 +47,14 @@ public sealed class ScanOrchestrator : IScanOrchestrator
             "Scan run starting: jurisdiction={Jurisdiction}, startDate={StartDate}, endDate={EndDate}, topicGroups={TopicGroupCount}.",
             request.Jurisdiction, request.StartDate, request.EndDate, request.TopicGroups.Count);
 
-        var contexts = MapToContexts(run, request.TopicGroups);
-        var results = new List<TopicGroupResult>(contexts.Count);
+        var topicGroups = MapToContexts(run, request.TopicGroups);
+        var results = new List<TopicGroupResult>(topicGroups.Count);
 
         // Sequential execution - one group at a time. Parallel fan-out is deferred to Epic 12.
-        foreach (var context in contexts)
+        foreach (var topicGroup in topicGroups)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var result = await _executor.ExecuteAsync(context, cancellationToken);
+            var result = await _executor.ExecuteAsync(topicGroup, cancellationToken);
             results.Add(result);
         }
 
