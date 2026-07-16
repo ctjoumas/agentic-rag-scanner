@@ -134,16 +134,35 @@ public sealed class LoopController : ILoopController
     }
 
     /// <summary>
-    /// True when the item was confidently published outside the scan's date-range window - before
-    /// <paramref name="lowerBound"/> (when set) or after <paramref name="upperBound"/>. Only a non-null
-    /// <see cref="ItemVerdict.PublicationDate"/> with <see cref="DateConfidence.Medium"/> or
-    /// <see cref="DateConfidence.High"/> confidence counts, so undated or low-confidence items are never
+    /// True when the item is confidently dated outside the scan's date-range window. After the end of the
+    /// window (<paramref name="upperBound"/>), only a confident <see cref="ItemVerdict.PublicationDate"/>
+    /// counts - a future EFFECTIVE date is a legitimate horizon item (e.g. a 2025 update announcing a 2026
+    /// change) and is deliberately NOT filtered. Before the start of the window (<paramref name="lowerBound"/>),
+    /// the publication date is preferred but falls back to the effective / applies-from date when publication
+    /// is unknown, so a purely historical item (e.g. a 2017 SI with no publication date) is still recognised
+    /// as out-of-window rather than surfacing as a current update. Undated or low-confidence items are never
     /// dropped on a date alone.
     /// </summary>
-    private static bool IsOutsideWindow(ItemVerdict verdict, DateOnly? lowerBound, DateOnly upperBound) =>
-        verdict.PublicationDate is { } published
-        && verdict.DateConfidence is DateConfidence.Medium or DateConfidence.High
-        && (published > upperBound || (lowerBound is { } start && published < start));
+    private static bool IsOutsideWindow(ItemVerdict verdict, DateOnly? lowerBound, DateOnly upperBound)
+    {
+        // Only confident dates can drop an item; undated / low-confidence items are never filtered on a date alone.
+        if (verdict.DateConfidence is not (DateConfidence.Medium or DateConfidence.High))
+        {
+            return false;
+        }
+
+        // Too new: only a known PUBLICATION date after the window's end counts. A future EFFECTIVE date is a
+        // legitimate horizon item (e.g. a 2025 update announcing a 2026 change) and is deliberately NOT filtered.
+        if (verdict.PublicationDate is not null && verdict.PublicationDate > upperBound)
+        {
+            return true;
+        }
+
+        // Too old: prefer the publication date, but fall back to the effective / applies-from date when
+        // publication is unknown, so a purely historical item (e.g. a 2017 SI) is still caught.
+        DateOnly? anchor = verdict.PublicationDate ?? verdict.EffectiveDate ?? verdict.AppliesFrom;
+        return lowerBound is not null && anchor is not null && anchor < lowerBound;
+    }
 
     /// <summary>Share of the pass's evaluated items judged RELEVANT (0 when nothing was evaluated).</summary>
     private static double ComputeRelevantShare(IReadOnlyList<ItemVerdict> items)
