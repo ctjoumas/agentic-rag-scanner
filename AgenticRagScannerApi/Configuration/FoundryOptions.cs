@@ -40,4 +40,42 @@ public class FoundryOptions
     /// <summary>Per-request timeout (seconds) the resilience pipeline enforces on each Foundry call.</summary>
     [Range(1, 600)]
     public int RequestTimeoutSeconds { get; set; } = 100;
+
+    /// <summary>
+    /// Optional per-agent model deployment overrides, keyed by agent name (see <see cref="FoundryAgentKeys"/>).
+    /// Every agent shares this Foundry endpoint; only the model deployment differs. An agent absent from
+    /// this map (or with a blank override) falls back to <see cref="ModelDeploymentName"/>.
+    /// </summary>
+    public Dictionary<string, FoundryAgentOptions> Agents { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolves the model deployment for the given agent key: the per-agent override when configured and
+    /// non-blank, otherwise the shared default <see cref="ModelDeploymentName"/>.
+    /// </summary>
+    public string ResolveModel(string agentKey)
+    {
+        if (Agents.TryGetValue(agentKey, out var agent) && !string.IsNullOrWhiteSpace(agent.ModelDeploymentName))
+        {
+            return agent.ModelDeploymentName;
+        }
+
+        return ModelDeploymentName;
+    }
+}
+
+/// <summary>Per-agent Foundry overrides bound from "Foundry:Agents:&lt;AgentName&gt;".</summary>
+public class FoundryAgentOptions
+{
+    /// <summary>Model deployment for this agent; when null/blank the shared default is used.</summary>
+    public string? ModelDeploymentName { get; set; }
+}
+
+/// <summary>Canonical agent keys used both as configuration keys under "Foundry:Agents" and in DI wiring.</summary>
+public static class FoundryAgentKeys
+{
+    public const string QuerySynthesis = "QuerySynthesis";
+    public const string RelevanceEval = "RelevanceEval";
+    public const string ImpactArea = "ImpactArea";
+    public const string Tags = "Tags";
+    public const string CompanyView = "CompanyView";
 }
