@@ -315,6 +315,106 @@ public class LoopControllerTests
         context.History.CurrentPass!.Review!.Vetted.Should().HaveCount(1);
     }
 
+    [Fact]
+    public async Task ReviewPass_DiscardsHistoricalItem_WhenPublicationNull_AndEffectiveDateBeforeStart()
+    {
+        // No publication date, but a confident EFFECTIVE date before the window start marks a purely
+        // historical item (e.g. a 2017 SI effective 2018) - it must be discarded, not surfaced as current.
+        var context = ArrangeWithCurrentPass(
+            maxLoops: 3, priorPasses: 0, startDate: new DateOnly(2025, 1, 1), endDate: new DateOnly(2025, 6, 30));
+        var store = new StubFullTextStore();
+        var controller = new LoopController(store, NullLogger<LoopController>.Instance);
+        var documents = new List<FetchedDocument> { WorkflowTestFactory.Doc("https://gov.uk/a") };
+        var decision = DatedDecision(new ItemVerdict
+        {
+            Index = 0,
+            Verdict = Verdict.Borderline,
+            PublicationDate = null,
+            EffectiveDate = new DateOnly(2018, 4, 6),
+            AppliesFrom = new DateOnly(2018, 4, 6),
+            DateConfidence = DateConfidence.High,
+        });
+
+        await controller.ReviewPassAsync(context, documents, decision);
+
+        var review = context.History.CurrentPass!.Review!;
+        review.Vetted.Should().BeEmpty();
+        review.Discarded.Should().HaveCount(1);
+        store.Persisted.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReviewPass_DiscardsHistoricalItem_WhenOnlyAppliesFromKnown_AndBeforeStart()
+    {
+        // Falls back past a null effective date to applies-from for the lower-bound (too-old) check.
+        var context = ArrangeWithCurrentPass(
+            maxLoops: 3, priorPasses: 0, startDate: new DateOnly(2025, 1, 1), endDate: new DateOnly(2025, 6, 30));
+        var controller = new LoopController(new StubFullTextStore(), NullLogger<LoopController>.Instance);
+        var documents = new List<FetchedDocument> { WorkflowTestFactory.Doc("https://gov.uk/a") };
+        var decision = DatedDecision(new ItemVerdict
+        {
+            Index = 0,
+            Verdict = Verdict.Relevant,
+            PublicationDate = null,
+            EffectiveDate = null,
+            AppliesFrom = new DateOnly(2018, 4, 6),
+            DateConfidence = DateConfidence.High,
+        });
+
+        await controller.ReviewPassAsync(context, documents, decision);
+
+        var review = context.History.CurrentPass!.Review!;
+        review.Vetted.Should().BeEmpty();
+        review.Discarded.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task ReviewPass_KeepsItem_WhenPublicationNull_ButEffectiveDateInWindow()
+    {
+        // No publication date, but the effective/applies date is inside the window - a current update that
+        // must be carried (guards against over-discarding when publication is simply unknown).
+        var context = ArrangeWithCurrentPass(
+            maxLoops: 3, priorPasses: 0, startDate: new DateOnly(2025, 1, 1), endDate: new DateOnly(2025, 6, 30));
+        var controller = new LoopController(new StubFullTextStore(), NullLogger<LoopController>.Instance);
+        var documents = new List<FetchedDocument> { WorkflowTestFactory.Doc("https://gov.uk/a") };
+        var decision = DatedDecision(new ItemVerdict
+        {
+            Index = 0,
+            Verdict = Verdict.Relevant,
+            PublicationDate = null,
+            EffectiveDate = new DateOnly(2025, 4, 6),
+            AppliesFrom = new DateOnly(2025, 4, 6),
+            DateConfidence = DateConfidence.High,
+        });
+
+        await controller.ReviewPassAsync(context, documents, decision);
+
+        context.History.CurrentPass!.Review!.Vetted.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task ReviewPass_KeepsFutureEffectiveDate_WhenPublicationNull()
+    {
+        // No publication date and a future effective date: the upper bound uses publication only, so a
+        // future effective date never triggers a discard - it stays a legitimate horizon item.
+        var context = ArrangeWithCurrentPass(
+            maxLoops: 3, priorPasses: 0, startDate: new DateOnly(2025, 1, 1), endDate: new DateOnly(2025, 6, 30));
+        var controller = new LoopController(new StubFullTextStore(), NullLogger<LoopController>.Instance);
+        var documents = new List<FetchedDocument> { WorkflowTestFactory.Doc("https://gov.uk/a") };
+        var decision = DatedDecision(new ItemVerdict
+        {
+            Index = 0,
+            Verdict = Verdict.Relevant,
+            PublicationDate = null,
+            EffectiveDate = new DateOnly(2026, 4, 6),
+            DateConfidence = DateConfidence.High,
+        });
+
+        await controller.ReviewPassAsync(context, documents, decision);
+
+        context.History.CurrentPass!.Review!.Vetted.Should().HaveCount(1);
+    }
+
     private static ReviewDecision DatedDecision(params ItemVerdict[] items) =>
         new()
         {
