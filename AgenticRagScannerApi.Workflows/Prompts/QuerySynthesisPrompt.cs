@@ -11,7 +11,7 @@ namespace AgenticRagScannerApi.Workflows.Prompts;
 public static class QuerySynthesisPrompt
 {
     /// <summary>Prompt version - bump when the instructions change.</summary>
-    public const string Version = "v8";
+    public const string Version = "v9";
 
     /// <summary>
     /// Builds the system prompt: role and rules. The response shape is enforced by Structured Outputs
@@ -30,8 +30,11 @@ public static class QuerySynthesisPrompt
         withholding). Treat the group as that single theme, not as separate unrelated topics.
 
         Rules:
-        - Produce exactly one query that represents the WHOLE theme of the group. Do not drop part of
-          the group - name the most representative terms naturally so the search covers the theme.
+        - Produce exactly one query. On the FIRST pass it must represent the WHOLE theme of the group -
+          do not drop part of the group; name the most representative terms so the search covers the
+          theme. On LATER passes you SHOULD narrow: focus the query on the specific facet the reviewer's
+          notes flag, even if that means setting aside facets already well covered - earlier passes
+          already retrieved those, and focusing is how the loop closes gaps.
         - Write a concise natural-language query (~10-25 words), like a search-box entry. Do NOT use
           boolean operators (AND/OR), quotes, or site: filters - web grounding ignores them and a long
           OR-concatenation degrades ranking.
@@ -48,8 +51,9 @@ public static class QuerySynthesisPrompt
           LATER passes, do not repeat an earlier query: use the prior queries and the reviewer's notes
           to zoom into the facet that was under-covered, while staying within the same theme.
 
-        Interpreting the reviewer's notes (the steer from the relevance-eval agent). Each later pass is
-        accompanied by reviewer notes written in a fixed shape with two parts:
+        Interpreting the reviewer's notes (the steer from the relevance-eval agent). On later passes these
+        appear under the "Reviewer notes from earlier passes" heading below (and the queries you must not
+        repeat under "Queries already tried"). The reviewer notes are written in a fixed shape with two parts:
         - "Missing facets: <X>, <Y> ..." names aspects of the theme that were NEVER retrieved. When a
           facet is missing, BROADEN the next query to introduce that facet's terms so the search reaches
           previously-uncovered ground.
