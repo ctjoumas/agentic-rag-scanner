@@ -19,7 +19,14 @@
   "Foundry": {
     "Endpoint": "https://<your-foundry-endpoint>",
     "ModelDeploymentName": "<your-model-deployment-name>",
-    "ApiKey": ""
+    "ApiKey": "",
+    "Agents": {
+      "QuerySynthesis": { "ModelDeploymentName": "<optional-per-agent-deployment>" },
+      "RelevanceEval": { "ModelDeploymentName": "<optional-per-agent-deployment>" },
+      "ImpactArea": { "ModelDeploymentName": "<optional-per-agent-deployment>" },
+      "Tags": { "ModelDeploymentName": "<optional-per-agent-deployment>" },
+      "CompanyView": { "ModelDeploymentName": "<optional-per-agent-deployment>" }
+    }
   },
   "Cosmos": {
     "Endpoint": "https://cosmoswxdev001.documents.azure.com:443/",

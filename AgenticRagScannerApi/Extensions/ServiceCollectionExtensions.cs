@@ -15,7 +15,6 @@ using AgenticRagScannerApi.Workflows.Steps;
 using AgenticRagScannerApi.Workflows.Tools;
 using AgenticRagScannerApi.Workflows.Vocabulary;
 using Azure;
-using Azure.AI.OpenAI;
 using Azure.AI.Projects;
 using Azure.AI.Projects.Agents;
 using Azure.Core;
@@ -138,32 +137,24 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddFoundryChatClient(this IServiceCollection services)
     {
-        // The single Foundry chat client (Microsoft.Extensions.AI IChatClient) that every MAF agent
-        // references (Epic 3, story 3.1). Built directly against the Foundry model deployment - keyless
-        // via DefaultAzureCredential, with an API key honored for local dev. Wrapped with a Polly
-        // resilience pipeline + the shared throttle (ResilientChatClient) and OpenTelemetry GenAI
-        // instrumentation so token/latency metrics are emitted once an exporter is wired (story 0.5).
+        // The Foundry chat client factory (Epic 3, story 3.1). Every MAF agent shares the same Foundry
+        // endpoint; only the model deployment differs, so agents can be pinned to different models via
+        // Foundry:Agents:<AgentName>:ModelDeploymentName. The factory builds one resilient IChatClient per
+        // deployment - keyless via DefaultAzureCredential (an API key is honored for local dev), wrapped
+        // with a Polly resilience pipeline + the shared throttle (ResilientChatClient) and OpenTelemetry
+        // GenAI instrumentation - and caches them.
+        services.AddSingleton<IChatClientFactory, ChatClientFactory>();
+
+        // The default IChatClient (the shared model deployment) for non-agent consumers such as
+        // IFoundryService and any agent without a per-agent override.
         services.AddSingleton<IChatClient>(sp =>
         {
             var options = sp.GetRequiredService<IOptions<FoundryOptions>>().Value;
-
-            var azureClient = string.IsNullOrWhiteSpace(options.ApiKey)
-                ? new AzureOpenAIClient(new Uri(options.Endpoint), sp.GetRequiredService<TokenCredential>())
-                : new AzureOpenAIClient(new Uri(options.Endpoint), new AzureKeyCredential(options.ApiKey));
-
-            IChatClient inner = azureClient
-                .GetChatClient(options.ModelDeploymentName)
-                .AsIChatClient();
-
-            IChatClient resilient = new ResilientChatClient(
-                inner,
-                sp.GetRequiredService<ISharedThrottle>(),
-                options,
-                sp.GetRequiredService<ILogger<ResilientChatClient>>());
-
-            return new ChatClientBuilder(resilient)
-                .UseOpenTelemetry()
-                .Build(sp);
+            var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("Foundry.DefaultChatClient");
+            logger.LogInformation(
+                "Default Foundry chat client uses model deployment '{ModelDeploymentName}' (shared default for non-agent consumers and any agent without an override).",
+                options.ModelDeploymentName);
+            return sp.GetRequiredService<IChatClientFactory>().Create(options.ModelDeploymentName);
         });
 
         return services;
@@ -182,14 +173,71 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddWorkflowServices(this IServiceCollection services)
     {
-        // MAF workflow agents over the shared Foundry IChatClient. Query Synthesis (Epic 3), Relevance
+        // MAF workflow agents over the Foundry chat client factory. Query Synthesis (Epic 3), Relevance
         // Eval (Epic 6), Impact Area + Tags + Summary (Epic 8) are real; Enrichment stays a stub (parked).
-        services.AddSingleton<IQuerySynthesisAgent, QuerySynthesisAgent>();
-        services.AddSingleton<IRelevanceEvalAgent, RelevanceEvalAgent>();
+        // Each real agent resolves its own model deployment (Foundry:Agents:<AgentName>:ModelDeploymentName,
+        // falling back to the shared Foundry:ModelDeploymentName) so agents can run on different models
+        // while sharing the same Foundry project.
+        services.AddSingleton<IQuerySynthesisAgent>(sp =>
+        {
+            var foundry = sp.GetRequiredService<IOptions<FoundryOptions>>().Value;
+            var logger = sp.GetRequiredService<ILogger<QuerySynthesisAgent>>();
+            var model = foundry.ResolveModel(FoundryAgentKeys.QuerySynthesis);
+            logger.LogInformation("Agent '{Agent}' resolved to Foundry model deployment '{ModelDeploymentName}'.", FoundryAgentKeys.QuerySynthesis, model);
+            var chatClient = sp.GetRequiredService<IChatClientFactory>().Create(model);
+            return new QuerySynthesisAgent(
+                chatClient,
+                sp.GetRequiredService<IOptions<QuerySynthesisOptions>>(),
+                logger);
+        });
+        services.AddSingleton<IRelevanceEvalAgent>(sp =>
+        {
+            var foundry = sp.GetRequiredService<IOptions<FoundryOptions>>().Value;
+            var logger = sp.GetRequiredService<ILogger<RelevanceEvalAgent>>();
+            var model = foundry.ResolveModel(FoundryAgentKeys.RelevanceEval);
+            logger.LogInformation("Agent '{Agent}' resolved to Foundry model deployment '{ModelDeploymentName}'.", FoundryAgentKeys.RelevanceEval, model);
+            var chatClient = sp.GetRequiredService<IChatClientFactory>().Create(model);
+            return new RelevanceEvalAgent(
+                chatClient,
+                logger);
+        });
         services.AddSingleton<IEnrichmentAgent, EnrichmentAgentStub>();
-        services.AddSingleton<IImpactAreaAgent, ImpactAreaAgent>();
-        services.AddSingleton<ITagsAgent, TagsAgent>();
-        services.AddSingleton<ICompanyViewAgent, CompanyViewAgent>();
+        services.AddSingleton<IImpactAreaAgent>(sp =>
+        {
+            var foundry = sp.GetRequiredService<IOptions<FoundryOptions>>().Value;
+            var logger = sp.GetRequiredService<ILogger<ImpactAreaAgent>>();
+            var model = foundry.ResolveModel(FoundryAgentKeys.ImpactArea);
+            logger.LogInformation("Agent '{Agent}' resolved to Foundry model deployment '{ModelDeploymentName}'.", FoundryAgentKeys.ImpactArea, model);
+            var chatClient = sp.GetRequiredService<IChatClientFactory>().Create(model);
+            return new ImpactAreaAgent(
+                chatClient,
+                sp.GetRequiredService<IRegulatoryVocabularyProvider>(),
+                logger);
+        });
+        services.AddSingleton<ITagsAgent>(sp =>
+        {
+            var foundry = sp.GetRequiredService<IOptions<FoundryOptions>>().Value;
+            var logger = sp.GetRequiredService<ILogger<TagsAgent>>();
+            var model = foundry.ResolveModel(FoundryAgentKeys.Tags);
+            logger.LogInformation("Agent '{Agent}' resolved to Foundry model deployment '{ModelDeploymentName}'.", FoundryAgentKeys.Tags, model);
+            var chatClient = sp.GetRequiredService<IChatClientFactory>().Create(model);
+            return new TagsAgent(
+                chatClient,
+                sp.GetRequiredService<IRegulatoryVocabularyProvider>(),
+                logger);
+        });
+        services.AddSingleton<ICompanyViewAgent>(sp =>
+        {
+            var foundry = sp.GetRequiredService<IOptions<FoundryOptions>>().Value;
+            var logger = sp.GetRequiredService<ILogger<CompanyViewAgent>>();
+            var model = foundry.ResolveModel(FoundryAgentKeys.CompanyView);
+            logger.LogInformation("Agent '{Agent}' resolved to Foundry model deployment '{ModelDeploymentName}'.", FoundryAgentKeys.CompanyView, model);
+            var chatClient = sp.GetRequiredService<IChatClientFactory>().Create(model);
+            return new CompanyViewAgent(
+                chatClient,
+                sp.GetRequiredService<IOptions<CompanyViewOptions>>(),
+                logger);
+        });
 
         // Deterministic steps + the allowlist-gated web search agent (canned hits in Epic 2).
         services.AddSingleton<IPreFilterStep, PreFilterStep>();

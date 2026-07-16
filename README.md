@@ -72,6 +72,16 @@ execute the synthesized queries. A per-run, in-memory
 **search history** (`searchQueries[]`, `vettedResults[]`, `discardedResults[]`) feeds both query
 synthesis (to avoid redundant queries) and evaluation (to assess coverage).
 
+**Per-agent model deployments.** The five in-process MAF agents — **Query Synthesis**, **Relevance
+Eval**, **Impact Area**, **Tags**, and **Company View** — all share the same Foundry endpoint/project,
+but each can run on its **own model deployment**. By default every agent uses the shared
+`Foundry:ModelDeploymentName`; to override an individual agent, add an entry under `Foundry:Agents`
+keyed by the agent name. This lets you use a small, cheap model for the lighter agents (e.g. Query
+Synthesis, Tags) and a larger model for the ones that make the real judgments (Relevance Eval,
+Company View) — without provisioning a separate Foundry project. Any override you set must reference a
+model deployment that already exists in the Foundry account. See [Configure](#configure) for the JSON
+shape.
+
 **Configuring the single Web Search Foundry agent.** The agent's definition lives in
 [infra/tools/AgenticRagScanner.DeployAgentCli/Configuration/bing-grounding-agent.yaml](infra/tools/AgenticRagScanner.DeployAgentCli/Configuration/bing-grounding-agent.yaml)
 and is (re)deployed by the `azd` post-provision hook. It is deliberately configured as a **lightweight,
@@ -236,9 +246,32 @@ Runbook:
 
    Key configuration sections:
 
-   - `Foundry` — Foundry endpoint + model deployment name (downstream MAF agents)
+   - `Foundry` — Foundry endpoint + default model deployment name (downstream MAF agents).
+     Optionally set **per-agent model deployments** under `Foundry:Agents:<AgentName>:ModelDeploymentName`
+     to run individual agents on different models while sharing the same Foundry endpoint/project.
+     The recognized agent names are `QuerySynthesis`, `RelevanceEval`, `ImpactArea`, `Tags`, and
+     `CompanyView` (case-insensitive). Any agent omitted — or whose override is blank — falls back to the
+     top-level `ModelDeploymentName`, so the whole `Agents` block is optional. Overrides must reference a
+     model deployment that **already exists** in the Foundry account (there is no auto-provisioning).
+
+     ```jsonc
+     "Foundry": {
+       "Endpoint": "https://<your-foundry>.services.ai.azure.com/",
+       "ModelDeploymentName": "gpt-5.4",          // shared default for every agent
+       "ApiKey": "",                               // leave blank to use DefaultAzureCredential
+       "Agents": {
+         "QuerySynthesis": { "ModelDeploymentName": "gpt-5.4-mini" },  // cheaper model
+         "Tags":           { "ModelDeploymentName": "gpt-5.4-mini" },  // cheaper model
+         "RelevanceEval":  { "ModelDeploymentName": "gpt-5.4" },       // (optional) same as default
+         "CompanyView":    { "ModelDeploymentName": "gpt-5.4" }        // (optional) same as default
+         // "ImpactArea" omitted → uses the top-level "gpt-5.4"
+       }
+     }
+     ```
    - `WebSearch` — Foundry project endpoint + the name of the pre-provisioned Web Search
-     agent (optionally a pinned `AgentVersion`), plus `MaxResults` and `RequestTimeoutSeconds`
+     agent (optionally a pinned `AgentVersion`), plus `MaxResults` and `RequestTimeoutSeconds`.
+     Note: the Web Search agent is a **hosted** Foundry agent, so its model is set at deploy time in its
+     YAML (`--model` / `FOUNDRY_MODEL`), **not** via `Foundry:Agents`.
    - `Cosmos` — account endpoint, database, the checkpoints container, and the `RegDocsContainer`
      (reference-data documents such as tags and impact areas, partitioned by `doc_type`)
    - `AzureStorage` — blob service URI + container names (`documents`, `exports`)

@@ -20,16 +20,19 @@ public sealed class ResilientChatClient : DelegatingChatClient
     private readonly ISharedThrottle _throttle;
     private readonly ResiliencePipeline _pipeline;
     private readonly ILogger<ResilientChatClient> _logger;
+    private readonly string _modelDeploymentName;
 
     public ResilientChatClient(
         IChatClient innerClient,
         ISharedThrottle throttle,
         FoundryOptions options,
-        ILogger<ResilientChatClient> logger)
+        ILogger<ResilientChatClient> logger,
+        string modelDeploymentName)
         : base(innerClient)
     {
         _throttle = throttle;
         _logger = logger;
+        _modelDeploymentName = modelDeploymentName;
 
         _pipeline = new ResiliencePipelineBuilder()
             .AddRetry(new RetryStrategyOptions
@@ -48,6 +51,10 @@ public sealed class ResilientChatClient : DelegatingChatClient
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation(
+            "MAF chat completion request to Foundry model deployment '{ModelDeploymentName}'.",
+            _modelDeploymentName);
+
         var stopwatch = Stopwatch.StartNew();
 
         var response = await _pipeline.ExecuteAsync(
@@ -61,7 +68,8 @@ public sealed class ResilientChatClient : DelegatingChatClient
 
         var usage = response.Usage;
         _logger.LogInformation(
-            "Foundry chat completion in {DurationMs:F0} ms (model {ModelId}); tokens in/out/total = {InputTokens}/{OutputTokens}/{TotalTokens}.",
+            "MAF chat completion for Foundry model deployment '{ModelDeploymentName}' completed in {DurationMs:F0} ms (service-reported model {ModelId}); tokens in/out/total = {InputTokens}/{OutputTokens}/{TotalTokens}.",
+            _modelDeploymentName,
             stopwatch.Elapsed.TotalMilliseconds,
             response.ModelId,
             usage?.InputTokenCount,

@@ -55,6 +55,50 @@ public class OptionsValidationTests
     }
 
     [Fact]
+    public void FoundryOptions_ResolveModel_WithPerAgentOverride_ShouldReturnOverride()
+    {
+        var options = new FoundryOptions
+        {
+            Endpoint = "https://foundry.example.com",
+            ModelDeploymentName = "gpt-default",
+            Agents =
+            {
+                [FoundryAgentKeys.QuerySynthesis] = new FoundryAgentOptions { ModelDeploymentName = "gpt-mini" },
+            },
+        };
+
+        options.ResolveModel(FoundryAgentKeys.QuerySynthesis).Should().Be("gpt-mini");
+    }
+
+    [Fact]
+    public void FoundryOptions_ResolveModel_WhenAgentAbsent_ShouldFallBackToDefault()
+    {
+        var options = new FoundryOptions
+        {
+            Endpoint = "https://foundry.example.com",
+            ModelDeploymentName = "gpt-default",
+        };
+
+        options.ResolveModel(FoundryAgentKeys.CompanyView).Should().Be("gpt-default");
+    }
+
+    [Fact]
+    public void FoundryOptions_ResolveModel_WhenOverrideBlank_ShouldFallBackToDefault()
+    {
+        var options = new FoundryOptions
+        {
+            Endpoint = "https://foundry.example.com",
+            ModelDeploymentName = "gpt-default",
+            Agents =
+            {
+                [FoundryAgentKeys.Tags] = new FoundryAgentOptions { ModelDeploymentName = "  " },
+            },
+        };
+
+        options.ResolveModel(FoundryAgentKeys.Tags).Should().Be("gpt-default");
+    }
+
+    [Fact]
     public void WebSearchOptions_WhenFullyConfigured_ShouldBeValid()
     {
         var options = new WebSearchOptions
