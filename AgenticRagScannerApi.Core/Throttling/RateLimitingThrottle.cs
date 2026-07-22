@@ -50,11 +50,19 @@ public sealed class RateLimitingThrottle : ISharedThrottle, IDisposable
 
         if (settings.RequestsPerWindow > 0)
         {
+            // Replenish gradually instead of dumping the whole budget once per window: a single big refill
+            // creates a "cliff" where, after the first burst is spent, every later call blocks until the
+            // next window boundary (up to WindowSeconds of stall). Spreading the same budget across many
+            // small refills keeps throughput smooth (e.g. 60/60s -> ~1 token per second).
+            var refillsPerWindow = Math.Clamp(settings.RequestsPerWindow, 1, (int)Math.Max(1, _windowSeconds * 10));
+            var replenishmentPeriod = TimeSpan.FromSeconds(_windowSeconds / refillsPerWindow);
+            var tokensPerPeriod = Math.Max(1, (int)Math.Round((double)settings.RequestsPerWindow / refillsPerWindow));
+
             _rate = new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
             {
                 TokenLimit = settings.RequestsPerWindow,
-                TokensPerPeriod = settings.RequestsPerWindow,
-                ReplenishmentPeriod = TimeSpan.FromSeconds(_windowSeconds),
+                TokensPerPeriod = tokensPerPeriod,
+                ReplenishmentPeriod = replenishmentPeriod,
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                 QueueLimit = _queueLimit,
                 AutoReplenishment = true,

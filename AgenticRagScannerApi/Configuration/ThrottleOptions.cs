@@ -29,11 +29,14 @@ public sealed class ThrottleOptions
     public int MaxConcurrentCalls { get; set; } = 8;
 
     /// <summary>
-    /// Request budget replenished each <see cref="WindowSeconds"/> window (the RPM/QPS ceiling). Set to 0
-    /// to disable rate limiting and cap concurrency only. Default 60.
+    /// Request budget replenished each <see cref="WindowSeconds"/> window (the RPM/QPS ceiling), spread
+    /// smoothly across the window. <b>Default 0 = disabled</b> (cap concurrency only), because there is no
+    /// safe universal RPM - a value below the model deployment's real quota would needlessly stall scans.
+    /// Set this to your deployment's actual requests-per-minute (with <see cref="WindowSeconds"/> = 60) to
+    /// enable the token-bucket rate limit.
     /// </summary>
     [Range(0, 100000)]
-    public int RequestsPerWindow { get; set; } = 60;
+    public int RequestsPerWindow { get; set; }
 
     /// <summary>Replenishment window, in seconds, for <see cref="RequestsPerWindow"/>. Default 60.</summary>
     [Range(1, 3600)]

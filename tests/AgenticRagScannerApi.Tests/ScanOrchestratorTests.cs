@@ -158,6 +158,59 @@ public class ScanOrchestratorTests
     }
 
     [Fact]
+    public async Task RunAsync_NeverRunsMoreGroupsThanTheParallelCap()
+    {
+        const int maxParallel = 2;
+        var current = 0;
+        var observedMax = 0;
+
+        var executor = new Mock<ITopicGroupExecutor>();
+        executor
+            .Setup(e => e.ExecuteAsync(It.IsAny<TopicGroupContext>(), It.IsAny<CancellationToken>()))
+            .Returns(async (TopicGroupContext context, CancellationToken _) =>
+            {
+                var now = Interlocked.Increment(ref current);
+                InterlockedMax(ref observedMax, now);
+                // Hold the slot briefly so groups genuinely overlap.
+                await Task.Delay(50);
+                Interlocked.Decrement(ref current);
+                return new TopicGroupResult
+                {
+                    GroupId = context.TopicGroup.Id,
+                    GroupName = context.TopicGroup.Name,
+                    Status = "Completed",
+                };
+            });
+
+        var orchestrator = CreateOrchestrator(executor.Object, maxParallel);
+        var request = new ScanRequest
+        {
+            Jurisdiction = "United Kingdom",
+            TopicGroups = ["A", "B", "C", "D", "E", "F"],
+        };
+
+        var result = await orchestrator.RunAsync(request, CancellationToken.None);
+
+        result.Groups.Should().HaveCount(6);
+        observedMax.Should().BeLessThanOrEqualTo(maxParallel, "the worker gate caps concurrency");
+        observedMax.Should().BeGreaterThan(1, "groups should actually run in parallel");
+    }
+
+    private static void InterlockedMax(ref int target, int value)
+    {
+        int initial;
+        do
+        {
+            initial = Volatile.Read(ref target);
+            if (value <= initial)
+            {
+                return;
+            }
+        }
+        while (Interlocked.CompareExchange(ref target, value, initial) != initial);
+    }
+
+    [Fact]
     public async Task RunAsync_SplitsCommaSeparatedGroup_IntoOneContextWithKeywordOrList()
     {
         var captured = new CapturedContexts();

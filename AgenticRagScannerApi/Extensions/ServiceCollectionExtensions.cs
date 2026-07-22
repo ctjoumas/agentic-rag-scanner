@@ -1,5 +1,6 @@
 using AgenticRagScannerApi.Configuration;
 using AgenticRagScannerApi.Core.Throttling;
+using AgenticRagScannerApi.Diagnostics;
 using AgenticRagScannerApi.Filters;
 using AgenticRagScannerApi.Mappers;
 using AgenticRagScannerApi.Orchestration;
@@ -27,6 +28,10 @@ using FluentValidation;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
+using Azure.Monitor.OpenTelemetry.Exporter;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Polly;
 using Polly.CircuitBreaker;
 using Polly.Retry;
@@ -67,6 +72,56 @@ public static class ServiceCollectionExtensions
         services.AddOptions<FetchOptions>().Bind(configuration.GetSection(FetchOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<RegulatoryUpdatesCsvOptions>().Bind(configuration.GetSection(RegulatoryUpdatesCsvOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<ThrottleOptions>().Bind(configuration.GetSection(ThrottleOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Wires OpenTelemetry traces + metrics for the scan orchestrator's parallel fan-out (Epic 13, story
+    /// 13.2): the custom <see cref="ScannerDiagnostics"/> source/meter (in-flight concurrency gauge,
+    /// worker-gate wait histogram, group-outcome counter, per-group spans), the Microsoft.Extensions.AI
+    /// GenAI instrumentation (token/latency), and ASP.NET Core request telemetry. Exports to Azure Monitor
+    /// when an Application Insights connection string is configured (the same resource Serilog logs to).
+    /// When no connection string is set (typical local dev) the instruments are still collected but not
+    /// exported anywhere - deliberately no console exporter, which would flood the terminal and bury the
+    /// Serilog logs. Logs stay on the existing Serilog -> App Insights sink, so OpenTelemetry here carries
+    /// only traces + metrics and does not double-emit logs.
+    /// </summary>
+    public static IServiceCollection AddScannerObservability(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        // Microsoft.Extensions.AI's UseOpenTelemetry() emits under this source/meter name.
+        const string genAiSourceName = "Experimental.Microsoft.Extensions.AI";
+        var appInsightsConnectionString = configuration["ApplicationInsights:ConnectionString"];
+        var exportToAzureMonitor = !string.IsNullOrWhiteSpace(appInsightsConnectionString);
+
+        services.AddOpenTelemetry()
+            .ConfigureResource(resource => resource.AddService("AgenticRagScannerApi"))
+            .WithTracing(tracing =>
+            {
+                tracing
+                    .AddSource(ScannerDiagnostics.ActivitySourceName)
+                    .AddSource(genAiSourceName)
+                    .AddAspNetCoreInstrumentation();
+
+                if (exportToAzureMonitor)
+                {
+                    tracing.AddAzureMonitorTraceExporter(o => o.ConnectionString = appInsightsConnectionString);
+                }
+            })
+            .WithMetrics(metrics =>
+            {
+                metrics
+                    .AddMeter(ScannerDiagnostics.MeterName)
+                    .AddMeter(genAiSourceName)
+                    .AddAspNetCoreInstrumentation();
+
+                if (exportToAzureMonitor)
+                {
+                    metrics.AddAzureMonitorMetricExporter(o => o.ConnectionString = appInsightsConnectionString);
+                }
+            });
 
         return services;
     }

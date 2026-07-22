@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using AgenticRagScannerApi.Configuration;
 using AgenticRagScannerApi.Core.Runtime;
+using AgenticRagScannerApi.Diagnostics;
 using AgenticRagScannerApi.Models;
 using Microsoft.Extensions.Options;
 
@@ -87,7 +88,13 @@ public sealed class ScanOrchestrator : IScanOrchestrator
                 var gateStopwatch = Stopwatch.StartNew();
                 await workerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 gateStopwatch.Stop();
+                ScannerDiagnostics.RecordWorkerWait(gateStopwatch.Elapsed.TotalMilliseconds, topicGroup.TopicGroup.Id);
 
+                using var activity = ScannerDiagnostics.StartTopicGroupActivity(
+                    runId, topicGroup.TopicGroup.Id, topicGroup.TopicGroup.Name);
+                activity?.SetTag("scanner.worker_wait_ms", gateStopwatch.Elapsed.TotalMilliseconds);
+
+                ScannerDiagnostics.GroupStarted();
                 var groupStopwatch = Stopwatch.StartNew();
                 try
                 {
@@ -95,15 +102,19 @@ public sealed class ScanOrchestrator : IScanOrchestrator
                         "Topic group '{TopicGroupId}' ({TopicGroupName}) started after waiting {GateWaitMs:F0} ms for a worker slot.",
                         topicGroup.TopicGroup.Id, topicGroup.TopicGroup.Name, gateStopwatch.Elapsed.TotalMilliseconds);
 
-                    results[index] = await ExecuteGroupAsync(topicGroup, cancellationToken).ConfigureAwait(false);
+                    var groupResult = await ExecuteGroupAsync(topicGroup, cancellationToken).ConfigureAwait(false);
+                    results[index] = groupResult;
 
                     groupStopwatch.Stop();
+                    activity?.SetTag("scanner.status", groupResult.Status);
+                    ScannerDiagnostics.RecordGroupOutcome(groupResult.Status);
                     _logger.LogInformation(
                         "Topic group '{TopicGroupId}' ({TopicGroupName}) finished with status {Status} in {DurationMs:F0} ms.",
-                        topicGroup.TopicGroup.Id, topicGroup.TopicGroup.Name, results[index].Status, groupStopwatch.Elapsed.TotalMilliseconds);
+                        topicGroup.TopicGroup.Id, topicGroup.TopicGroup.Name, groupResult.Status, groupStopwatch.Elapsed.TotalMilliseconds);
                 }
                 finally
                 {
+                    ScannerDiagnostics.GroupFinished();
                     workerGate.Release();
                 }
             }, cancellationToken));

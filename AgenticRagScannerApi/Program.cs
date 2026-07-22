@@ -14,6 +14,11 @@ WebApplicationBuilderExtensions.AddSerilogLogging(builder);
 
 builder.Services.AddApiServices(builder.Configuration);
 
+// OpenTelemetry traces + metrics for the parallel scan orchestrator (Epic 13.2). Exports to Azure
+// Monitor when the App Insights connection string is set; otherwise the instruments are collected but not
+// exported (no console exporter - it would flood the terminal and bury the Serilog logs).
+builder.Services.AddScannerObservability(builder.Configuration);
+
 var app = builder.Build();
 
 // One-off data seeding: `dotnet run -- seed [tags|impactareas]` provisions the requested seed
