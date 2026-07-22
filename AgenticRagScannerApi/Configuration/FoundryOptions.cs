@@ -42,6 +42,33 @@ public class FoundryOptions
     public int RequestTimeoutSeconds { get; set; } = 100;
 
     /// <summary>
+    /// When true, an HTTP <c>Retry-After</c> header on a throttled/overloaded response (429/503/529)
+    /// overrides the exponential backoff for that retry, so the client waits exactly as long as the
+    /// service asks instead of hammering it. Default true.
+    /// </summary>
+    public bool RespectRetryAfter { get; set; } = true;
+
+    /// <summary>
+    /// Fraction of calls (0.0-1.0) that must fail within the sampling window before the circuit breaker
+    /// opens and short-circuits further calls (fail fast instead of piling onto an overloaded endpoint).
+    /// Default 0.5.
+    /// </summary>
+    [Range(0.0, 1.0)]
+    public double CircuitBreakerFailureRatio { get; set; } = 0.5;
+
+    /// <summary>Rolling window (seconds) over which <see cref="CircuitBreakerFailureRatio"/> is measured. Default 30.</summary>
+    [Range(1, 3600)]
+    public int CircuitBreakerSamplingSeconds { get; set; } = 30;
+
+    /// <summary>Minimum calls in the sampling window before the breaker can trip (avoids opening on tiny samples). Default 10.</summary>
+    [Range(1, 10000)]
+    public int CircuitBreakerMinimumThroughput { get; set; } = 10;
+
+    /// <summary>How long (seconds) the breaker stays open before probing with a trial call. Default 15.</summary>
+    [Range(1, 3600)]
+    public int CircuitBreakerBreakSeconds { get; set; } = 15;
+
+    /// <summary>
     /// Optional per-agent model deployment overrides, keyed by agent name (see <see cref="FoundryAgentKeys"/>).
     /// Every agent shares this Foundry endpoint; only the model deployment differs. An agent absent from
     /// this map (or with a blank override) falls back to <see cref="ModelDeploymentName"/>.

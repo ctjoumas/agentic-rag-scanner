@@ -28,6 +28,7 @@ using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using Polly;
+using Polly.CircuitBreaker;
 using Polly.Retry;
 using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
 using System.ClientModel;
@@ -65,6 +66,7 @@ public static class ServiceCollectionExtensions
         services.AddOptions<WebSearchOptions>().Bind(configuration.GetSection(WebSearchOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<FetchOptions>().Bind(configuration.GetSection(FetchOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<RegulatoryUpdatesCsvOptions>().Bind(configuration.GetSection(RegulatoryUpdatesCsvOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<ThrottleOptions>().Bind(configuration.GetSection(ThrottleOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
 
         return services;
     }
@@ -126,8 +128,13 @@ public static class ServiceCollectionExtensions
         // once and cached.
         services.AddSingleton<IPriorCompanyViewSource, CsvPriorCompanyViewSource>();
 
-        // Shared throttle - Phase 0 pass-through; real TPM/RPM/QPS limits arrive later.
-        services.AddSingleton<ISharedThrottle, NoOpThrottle>();
+        // Shared throttle - the real RateLimitingThrottle gates outbound Azure OpenAI / Bing calls
+        // (concurrency cap + token-bucket RPM/QPS) so N parallel topic groups (Epic 13) never exceed shared
+        // service limits. Built once from the validated ThrottleOptions.
+        services.AddSingleton<ISharedThrottle>(sp =>
+            new RateLimitingThrottle(
+                sp.GetRequiredService<IOptions<ThrottleOptions>>().Value.ToThrottleSettings(),
+                sp.GetRequiredService<ILogger<RateLimitingThrottle>>()));
 
         // Keyless auth - inject this TokenCredential into Azure SDK clients (keys are local-dev only).
         services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
@@ -300,9 +307,10 @@ public static class ServiceCollectionExtensions
                 agent = projectClient.AsAIAgent(version);
             }
 
-            // Retry transient Bing-grounding failures with exponential backoff + jitter and a per-attempt
-            // timeout, mirroring ResilientChatClient. A single agent error still degrades gracefully:
-            // once retries are exhausted the agent logs and returns no hits rather than aborting the run.
+            // Retry transient Bing-grounding failures with exponential backoff + jitter (honoring a server
+            // Retry-After hint), a circuit breaker that fails fast when the agent is repeatedly overloaded,
+            // and a per-attempt timeout, mirroring ResilientChatClient. A single agent error still degrades
+            // gracefully: once retries are exhausted the agent logs and returns no hits rather than aborting.
             var resilience = new ResiliencePipelineBuilder()
                 .AddRetry(new RetryStrategyOptions
                 {
@@ -310,7 +318,18 @@ public static class ServiceCollectionExtensions
                     BackoffType = DelayBackoffType.Exponential,
                     UseJitter = true,
                     Delay = TimeSpan.FromSeconds(options.RetryBaseDelaySeconds),
-                    ShouldHandle = static args => ValueTask.FromResult(IsTransientWebSearchFailure(args.Outcome.Exception)),
+                    ShouldHandle = static args => ValueTask.FromResult(ResilienceHelpers.IsTransient(args.Outcome.Exception)),
+                    DelayGenerator = options.RespectRetryAfter
+                        ? args => ValueTask.FromResult(ResilienceHelpers.TryGetRetryAfter(args.Outcome.Exception))
+                        : null,
+                })
+                .AddCircuitBreaker(new CircuitBreakerStrategyOptions
+                {
+                    FailureRatio = options.CircuitBreakerFailureRatio,
+                    SamplingDuration = TimeSpan.FromSeconds(options.CircuitBreakerSamplingSeconds),
+                    MinimumThroughput = options.CircuitBreakerMinimumThroughput,
+                    BreakDuration = TimeSpan.FromSeconds(options.CircuitBreakerBreakSeconds),
+                    ShouldHandle = static args => ValueTask.FromResult(ResilienceHelpers.IsTransient(args.Outcome.Exception)),
                 })
                 .AddTimeout(TimeSpan.FromSeconds(options.RequestTimeoutSeconds + 30))
                 .Build();
@@ -328,27 +347,6 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
-
-    /// <summary>
-    /// Classifies an exception thrown by the hosted Web Search agent as transient (worth retrying):
-    /// connection drops (status 0), request timeouts (408), throttling (429), and server-side (5xx)
-    /// failures.
-    /// <para>
-    /// HTTP 408 is treated as transient (like <see cref="ResilientChatClient"/>). For a Bing-grounded
-    /// agent a 408 means the run did not finish in time, which is often intermittent (Bing latency
-    /// spikes, cold routing) rather than a permanent failure. The resilience pipeline retries with
-    /// exponential backoff + jitter and a per-attempt timeout, giving the search a reasonable window to
-    /// complete before the group is surfaced as Failed.
-    /// </para>
-    /// </summary>
-    private static bool IsTransientWebSearchFailure(Exception? exception) => exception switch
-    {
-        ClientResultException clientResult => clientResult.Status is 0 or 408 or 429 or >= 500,
-        RequestFailedException requestFailed => requestFailed.Status is 0 or 408 or 429 or >= 500,
-        HttpRequestException => true,
-        TimeoutException => true,
-        _ => false,
-    };
 
     public static IServiceCollection AddValidationServices(this IServiceCollection services)
     {

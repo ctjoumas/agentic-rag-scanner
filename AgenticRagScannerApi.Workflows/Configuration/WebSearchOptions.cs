@@ -50,4 +50,29 @@ public sealed class WebSearchOptions
     /// </summary>
     [Range(1, 600)]
     public int RequestTimeoutSeconds { get; set; } = 240;
+
+    /// <summary>
+    /// When true, an HTTP <c>Retry-After</c> header on a throttled/overloaded agent response (429/529)
+    /// overrides the exponential backoff for that retry. Default true.
+    /// </summary>
+    public bool RespectRetryAfter { get; set; } = true;
+
+    /// <summary>
+    /// Fraction of calls (0.0-1.0) that must fail within the sampling window before the circuit breaker
+    /// opens and short-circuits further Web Search runs. Default 0.5.
+    /// </summary>
+    [Range(0.0, 1.0)]
+    public double CircuitBreakerFailureRatio { get; set; } = 0.5;
+
+    /// <summary>Rolling window (seconds) over which <see cref="CircuitBreakerFailureRatio"/> is measured. Default 30.</summary>
+    [Range(1, 3600)]
+    public int CircuitBreakerSamplingSeconds { get; set; } = 30;
+
+    /// <summary>Minimum calls in the sampling window before the breaker can trip. Default 5.</summary>
+    [Range(1, 10000)]
+    public int CircuitBreakerMinimumThroughput { get; set; } = 5;
+
+    /// <summary>How long (seconds) the breaker stays open before probing with a trial call. Default 15.</summary>
+    [Range(1, 3600)]
+    public int CircuitBreakerBreakSeconds { get; set; } = 15;
 }

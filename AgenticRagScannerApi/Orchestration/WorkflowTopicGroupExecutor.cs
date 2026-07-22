@@ -1,6 +1,5 @@
 using System.Text.Json;
 using AgenticRagScannerApi.Core.Runtime;
-using AgenticRagScannerApi.Core.Throttling;
 using AgenticRagScannerApi.Workflows;
 using AgenticRagScannerApi.Workflows.Checkpointing;
 using Microsoft.Agents.AI.Workflows;
@@ -10,9 +9,15 @@ namespace AgenticRagScannerApi.Orchestration;
 /// <summary>
 /// Epic 2 per-group executor: builds and runs the topic group's MAF workflow (the seven-executor
 /// agentic RAG loop), checkpointing to Cosmos so a run is resumable, and returns its aggregated
-/// <see cref="TopicGroupResult"/>. Replaces the Phase 1 <c>StubTopicGroupExecutor</c>. Outbound work
-/// funnels through the shared throttle (the seam Epic 3+ real LLM/Bing calls use), and logging is
-/// scoped to <c>runId</c>/<c>topicGroupId</c>.
+/// <see cref="TopicGroupResult"/>. Replaces the Phase 1 <c>StubTopicGroupExecutor</c>. Logging is scoped
+/// to <c>runId</c>/<c>topicGroupId</c>.
+/// <para>
+/// Outbound LLM/Bing calls funnel through the shared throttle at the point of each call
+/// (<c>ResilientChatClient</c> / <c>WebSearchAgent</c>), not here: wrapping the whole workflow in the
+/// throttle's concurrency limiter would hold a slot for the group's entire lifetime while its inner calls
+/// wait for slots from the same limiter - a deadlock once groups run in parallel (Epic 13). Group-level
+/// parallelism is capped by the orchestrator instead.
+/// </para>
 /// </summary>
 public sealed class WorkflowTopicGroupExecutor : ITopicGroupExecutor
 {
@@ -20,18 +25,15 @@ public sealed class WorkflowTopicGroupExecutor : ITopicGroupExecutor
 
     private readonly IServiceProvider _serviceProvider;
     private readonly CosmosCheckpointStore _checkpointStore;
-    private readonly ISharedThrottle _throttle;
     private readonly ILogger<WorkflowTopicGroupExecutor> _logger;
 
     public WorkflowTopicGroupExecutor(
         IServiceProvider serviceProvider,
         CosmosCheckpointStore checkpointStore,
-        ISharedThrottle throttle,
         ILogger<WorkflowTopicGroupExecutor> logger)
     {
         _serviceProvider = serviceProvider;
         _checkpointStore = checkpointStore;
-        _throttle = throttle;
         _logger = logger;
     }
 
@@ -47,12 +49,7 @@ public sealed class WorkflowTopicGroupExecutor : ITopicGroupExecutor
 
         _logger.LogInformation("Topic group '{TopicGroupName}' workflow starting.", group.Name);
 
-        // Outbound (LLM/Bing) calls inside the workflow funnel through the shared throttle. With the
-        // Phase 0 NoOpThrottle this is a pass-through; real TPM/RPM/QPS limits arrive later.
-        var result = await _throttle.ExecuteAsync(
-            ct => RunWorkflowAsync(context, ct),
-            permits: 1,
-            cancellationToken);
+        var result = await RunWorkflowAsync(context, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Topic group '{TopicGroupName}' workflow completed: {LoopCount} pass(es), {ItemCount} item(s).",

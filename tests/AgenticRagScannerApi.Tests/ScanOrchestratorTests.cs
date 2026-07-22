@@ -1,26 +1,26 @@
+using AgenticRagScannerApi.Configuration;
 using AgenticRagScannerApi.Core.Runtime;
 using AgenticRagScannerApi.Models;
 using AgenticRagScannerApi.Orchestration;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace AgenticRagScannerApi.Tests;
 
 /// <summary>
-/// Story 1.1 - the orchestrator maps a request to one context per topic group (each seeded with an
-/// empty SearchHistory and sharing one RunContext), runs the groups sequentially in request order,
-/// and aggregates their results.
+/// Story 1.1 + Epic 13.1 - the orchestrator maps a request to one context per topic group (each seeded
+/// with an empty SearchHistory and sharing one RunContext), runs the groups in parallel under a worker
+/// cap, aggregates their results in request order, and isolates per-group failures.
 /// </summary>
 public class ScanOrchestratorTests
 {
     [Fact]
     public async Task RunAsync_CreatesOneContextPerGroup_SeededWithEmptyHistory_SharingOneRunContext()
     {
-        var captured = new List<TopicGroupContext>();
-        var orchestrator = new ScanOrchestrator(
-            CreateCapturingExecutor(captured),
-            Mock.Of<ILogger<ScanOrchestrator>>());
+        var captured = new CapturedContexts();
+        var orchestrator = CreateOrchestrator(CreateCapturingExecutor(captured));
 
         var startDate = new DateOnly(2026, 1, 1);
         var endDate = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -34,23 +34,22 @@ public class ScanOrchestratorTests
 
         var result = await orchestrator.RunAsync(request, CancellationToken.None);
 
-        captured.Should().HaveCount(3);
-        captured.Should().OnlyContain(c => c.History.Passes.Count == 0);
-        captured.Should().OnlyContain(c => c.Run.RunId == result.RunId);
-        captured.Should().OnlyContain(c => c.Run.Jurisdiction == "United Kingdom");
-        captured.Should().OnlyContain(c => c.Run.StartDate == startDate);
-        captured.Should().OnlyContain(c => c.Run.EndDate == endDate);
-        captured.Should().OnlyContain(c =>
+        var contexts = captured.Snapshot();
+        contexts.Should().HaveCount(3);
+        contexts.Should().OnlyContain(c => c.History.Passes.Count == 0);
+        contexts.Should().OnlyContain(c => c.Run.RunId == result.RunId);
+        contexts.Should().OnlyContain(c => c.Run.Jurisdiction == "United Kingdom");
+        contexts.Should().OnlyContain(c => c.Run.StartDate == startDate);
+        contexts.Should().OnlyContain(c => c.Run.EndDate == endDate);
+        contexts.Should().OnlyContain(c =>
             c.TopicGroup.Keywords.Count == 1 && c.TopicGroup.Keywords[0] == c.TopicGroup.Name);
     }
 
     [Fact]
-    public async Task RunAsync_ExecutesGroupsSequentiallyInRequestOrder_AndAggregatesResults()
+    public async Task RunAsync_RunsGroupsInParallel_AndAggregatesResultsInRequestOrder()
     {
-        var captured = new List<TopicGroupContext>();
-        var orchestrator = new ScanOrchestrator(
-            CreateCapturingExecutor(captured),
-            Mock.Of<ILogger<ScanOrchestrator>>());
+        var captured = new CapturedContexts();
+        var orchestrator = CreateOrchestrator(CreateCapturingExecutor(captured));
 
         var request = new ScanRequest
         {
@@ -61,7 +60,9 @@ public class ScanOrchestratorTests
 
         var result = await orchestrator.RunAsync(request, CancellationToken.None);
 
-        captured.Select(c => c.TopicGroup.Name).Should().Equal("Tax", "Conduct", "Capital");
+        // All three groups ran (execution order is nondeterministic under parallelism)...
+        captured.Snapshot().Select(c => c.TopicGroup.Name).Should().BeEquivalentTo("Tax", "Conduct", "Capital");
+        // ...but the aggregated results preserve the request order.
         result.Groups.Select(g => g.GroupName).Should().Equal("Tax", "Conduct", "Capital");
         result.Groups.Should().OnlyContain(g => g.Status == "Completed");
         result.RunId.Should().NotBeNullOrWhiteSpace();
@@ -69,12 +70,98 @@ public class ScanOrchestratorTests
     }
 
     [Fact]
+    public async Task RunAsync_IsolatesGroupFailure_OtherGroupsComplete_FailedGroupMarkedFailed()
+    {
+        // The executor throws for "Conduct" and completes the others.
+        var executor = new Mock<ITopicGroupExecutor>();
+        executor
+            .Setup(e => e.ExecuteAsync(It.IsAny<TopicGroupContext>(), It.IsAny<CancellationToken>()))
+            .Returns((TopicGroupContext context, CancellationToken _) =>
+            {
+                if (context.TopicGroup.Name == "Conduct")
+                {
+                    throw new InvalidOperationException("boom");
+                }
+
+                return Task.FromResult(new TopicGroupResult
+                {
+                    GroupId = context.TopicGroup.Id,
+                    GroupName = context.TopicGroup.Name,
+                    Status = "Completed",
+                });
+            });
+
+        var orchestrator = CreateOrchestrator(executor.Object);
+        var request = new ScanRequest
+        {
+            Jurisdiction = "United Kingdom",
+            TopicGroups = ["Tax", "Conduct", "Capital"],
+        };
+
+        var result = await orchestrator.RunAsync(request, CancellationToken.None);
+
+        result.Groups.Select(g => g.GroupName).Should().Equal("Tax", "Conduct", "Capital");
+        result.Groups.Single(g => g.GroupName == "Tax").Status.Should().Be("Completed");
+        result.Groups.Single(g => g.GroupName == "Capital").Status.Should().Be("Completed");
+        result.Groups.Single(g => g.GroupName == "Conduct").Status.Should().Be("Failed");
+    }
+
+    [Fact]
+    public async Task RunAsync_Cancellation_Propagates()
+    {
+        using var cts = new CancellationTokenSource();
+        var executor = new Mock<ITopicGroupExecutor>();
+        executor
+            .Setup(e => e.ExecuteAsync(It.IsAny<TopicGroupContext>(), It.IsAny<CancellationToken>()))
+            .Returns((TopicGroupContext _, CancellationToken token) =>
+            {
+                cts.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.FromResult(new TopicGroupResult
+                {
+                    GroupId = "x",
+                    GroupName = "x",
+                    Status = "Completed",
+                });
+            });
+
+        var orchestrator = CreateOrchestrator(executor.Object);
+        var request = new ScanRequest
+        {
+            Jurisdiction = "United Kingdom",
+            TopicGroups = ["Tax", "Conduct"],
+        };
+
+        var act = () => orchestrator.RunAsync(request, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task RunAsync_DuplicateTopicGroups_GetDistinctGroupIds()
+    {
+        var captured = new CapturedContexts();
+        var orchestrator = CreateOrchestrator(CreateCapturingExecutor(captured));
+
+        var request = new ScanRequest
+        {
+            Jurisdiction = "United Kingdom",
+            // Two identical topic groups - they hash to the same base id and must be disambiguated so
+            // parallel Cosmos checkpoints do not collide.
+            TopicGroups = ["Employee NIC, Income Tax", "Employee NIC, Income Tax"],
+        };
+
+        var result = await orchestrator.RunAsync(request, CancellationToken.None);
+
+        result.Groups.Should().HaveCount(2);
+        result.Groups.Select(g => g.GroupId).Distinct().Should().HaveCount(2);
+    }
+
+    [Fact]
     public async Task RunAsync_SplitsCommaSeparatedGroup_IntoOneContextWithKeywordOrList()
     {
-        var captured = new List<TopicGroupContext>();
-        var orchestrator = new ScanOrchestrator(
-            CreateCapturingExecutor(captured),
-            Mock.Of<ILogger<ScanOrchestrator>>());
+        var captured = new CapturedContexts();
+        var orchestrator = CreateOrchestrator(CreateCapturingExecutor(captured));
 
         var request = new ScanRequest
         {
@@ -87,8 +174,9 @@ public class ScanOrchestratorTests
 
         await orchestrator.RunAsync(request, CancellationToken.None);
 
-        captured.Should().HaveCount(1);
-        var group = captured[0].TopicGroup;
+        var contexts = captured.Snapshot();
+        contexts.Should().HaveCount(1);
+        var group = contexts[0].TopicGroup;
         group.Keywords.Should().Equal("Employee NIC", "Income Tax", "ITEPA 2003");
         group.Name.Should().Be("Employee NIC, Income Tax, ITEPA 2003");
         group.Id.Should().NotBeNullOrWhiteSpace();
@@ -98,7 +186,7 @@ public class ScanOrchestratorTests
     public async Task RunAsync_WithNoTopicGroups_ReturnsEmptyAggregate_WithoutCallingExecutor()
     {
         var executor = new Mock<ITopicGroupExecutor>();
-        var orchestrator = new ScanOrchestrator(executor.Object, Mock.Of<ILogger<ScanOrchestrator>>());
+        var orchestrator = CreateOrchestrator(executor.Object);
 
         var request = new ScanRequest
         {
@@ -115,7 +203,13 @@ public class ScanOrchestratorTests
             Times.Never);
     }
 
-    private static ITopicGroupExecutor CreateCapturingExecutor(List<TopicGroupContext> captured)
+    private static ScanOrchestrator CreateOrchestrator(ITopicGroupExecutor executor, int maxParallel = 4)
+    {
+        var options = Options.Create(new ThrottleOptions { MaxParallelTopicGroups = maxParallel });
+        return new ScanOrchestrator(executor, options, Mock.Of<ILogger<ScanOrchestrator>>());
+    }
+
+    private static ITopicGroupExecutor CreateCapturingExecutor(CapturedContexts captured)
     {
         var executor = new Mock<ITopicGroupExecutor>();
         executor
@@ -131,5 +225,28 @@ public class ScanOrchestratorTests
                 });
             });
         return executor.Object;
+    }
+
+    /// <summary>Thread-safe capture of the contexts the executor received (groups run in parallel).</summary>
+    private sealed class CapturedContexts
+    {
+        private readonly object _gate = new();
+        private readonly List<TopicGroupContext> _contexts = [];
+
+        public void Add(TopicGroupContext context)
+        {
+            lock (_gate)
+            {
+                _contexts.Add(context);
+            }
+        }
+
+        public IReadOnlyList<TopicGroupContext> Snapshot()
+        {
+            lock (_gate)
+            {
+                return _contexts.ToList();
+            }
+        }
     }
 }
