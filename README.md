@@ -103,6 +103,32 @@ Pre-filter → Fetch & Clean → Relevance Eval → Loop Controller → Finalize
 branches on a conditional edge — `Retry` loops back to Query Synthesis for another pass, `Finalize`
 exits to the Finalize tail. This decomposition enables mid-pass checkpoint resume.
 
+### Concurrency & throttling
+
+The topic groups run **in parallel**, and outbound model/search calls are rate-limited — these are two
+**separate** limits, and keeping them separate is deliberate (a single shared limiter used for both
+would deadlock: a group would hold a slot for its whole lifetime while the very calls it needs wait on
+the same limiter). All are tuned under the `Throttle` configuration section.
+
+| Limit | Caps | Mechanism | Config (default) |
+|-------|------|-----------|------------------|
+| **Group parallelism** | how many topic-group workflows run at once in a single scan | a `SemaphoreSlim` worker gate in `ScanOrchestrator` | `MaxParallelTopicGroups` (4) |
+| **Call concurrency** | outbound Foundry / Bing calls in flight at once across **all** groups | a `ConcurrencyLimiter` in `RateLimitingThrottle` | `MaxConcurrentCalls` (8) |
+| **Request budget (RPM/QPS)** | outbound calls per rolling window, replenished smoothly | a `TokenBucketRateLimiter` in `RateLimitingThrottle` | `RequestsPerWindow` (0 = disabled) / `WindowSeconds` (60) |
+| **Backpressure queue** | callers allowed to wait once a limit is hit; beyond it they fail fast with `ThrottleRejectedException` (classified transient, so Polly backs off and retries) | queue on both limiters | `QueueLimit` (256) |
+
+Flow: the orchestrator fans out with `Task.WhenAll`, and each group must acquire a `SemaphoreSlim` slot
+(`MaxParallelTopicGroups`) before executing — extra groups queue and the wait is emitted as a
+backpressure metric. Inside a group, each individual model/search call is gated **at the point of the
+call** by the shared `RateLimitingThrottle` (concurrency + optional RPM/QPS), never around the whole
+workflow. Groups are isolated: one group failing is surfaced as a `Failed` result and does not abort the
+run. Concurrency is observable via OpenTelemetry (in-flight gauge, worker-wait histogram, group-outcome
+counter, per-group spans) exported to Azure Monitor when Application Insights is configured.
+
+Rule of thumb: `MaxParallelTopicGroups × (typical concurrent calls per group)` should not exceed
+`MaxConcurrentCalls`, and the sustained call rate should not exceed `RequestsPerWindow / WindowSeconds`.
+Full tuning guidance is in [docs/0.4-shared-throttle.md](docs/0.4-shared-throttle.md).
+
 For full design details see [docs/horizon-scanner-architecture.md](docs/horizon-scanner-architecture.md),
 [docs/architecture-context.md](docs/architecture-context.md), and
 [docs/maf-executor-design.md](docs/maf-executor-design.md) (the executor decomposition).
@@ -278,6 +304,10 @@ Runbook:
    - `AzureSearch` — search endpoint + index name (planned memory store)
    - `Fetch` — full-text fetch limits (allowed content types, max response size,
      max redirects, request timeout)
+   - `Throttle` — concurrency & rate limits (see [Concurrency & throttling](#concurrency--throttling)):
+     `MaxParallelTopicGroups` (group fan-out cap, default 4), `MaxConcurrentCalls` (outbound call
+     concurrency, default 8), `RequestsPerWindow` / `WindowSeconds` (RPM/QPS budget, default 0 = disabled),
+     and `QueueLimit` (backpressure allowance, default 256)
    - `ApplicationInsights` — connection string (optional)
 
 ### Build & run
@@ -360,8 +390,16 @@ resume (see [docs/maf-executor-design.md](docs/maf-executor-design.md)), and the
 text) and an **aggregate Company View** per topic group that produces both a neutral *Summary of
 Update* and the practitioner *Company View* in a single call, via RAG over prior Company Views by
 jurisdiction.
+
+**Epic 13 (fan-out & parallelization) is also complete:** the sequential run loop is replaced by
+parallel per-topic-group execution (`Task.WhenAll` under a `SemaphoreSlim` worker cap) with per-group
+failure isolation, the real `RateLimitingThrottle` (concurrency + optional RPM/QPS + backpressure) gates
+outbound calls, and OpenTelemetry traces/metrics surface in-flight concurrency — see
+[Concurrency & throttling](#concurrency--throttling).
+
 Later epics cover the deterministic quality gates + Cosmos persistence, publish/export,
-and the future memory/review loop.
+and the future memory/review loop, plus remaining hardening (formal eval suite, dashboards & alerts,
+security review) tracked under Epic 12.
 
 ## License
 
