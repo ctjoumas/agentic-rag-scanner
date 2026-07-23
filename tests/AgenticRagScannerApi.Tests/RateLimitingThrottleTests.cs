@@ -70,4 +70,29 @@ public class RateLimitingThrottleTests
             (await throttle.AcquireAsync()).Dispose();
         }
     }
+
+    [Fact]
+    public async Task AcquireAsync_OverConcurrencyLimit_WaitsInQueue_ThenProceedsOnRelease()
+    {
+        // One concurrency slot, but a wait queue of one: a second caller must BLOCK (backpressure) rather
+        // than be rejected, and then proceed the moment the held slot is released. This is the queuing path
+        // the QueueLimit: 0 tests above deliberately cannot exercise.
+        using var throttle = new RateLimitingThrottle(new RateLimitingThrottleSettings(
+            MaxConcurrentCalls: 1, RequestsPerWindow: 0, WindowSeconds: 60, QueueLimit: 1));
+
+        var lease1 = await throttle.AcquireAsync();
+
+        // Second acquire while the only slot is held: it should queue, not complete.
+        var secondAcquire = Task.Run(async () => await throttle.AcquireAsync());
+
+        // Give the task time to reach the limiter's wait; it must still be blocked.
+        await Task.Delay(100);
+        secondAcquire.IsCompleted.Should().BeFalse("the only slot is held, so the second acquire must wait in the queue");
+
+        // Releasing the first slot must unblock the waiter.
+        lease1.Dispose();
+
+        var lease2 = await secondAcquire.WaitAsync(TimeSpan.FromSeconds(5));
+        lease2.Dispose();
+    }
 }

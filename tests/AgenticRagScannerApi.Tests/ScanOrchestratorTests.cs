@@ -1,5 +1,6 @@
 using AgenticRagScannerApi.Configuration;
 using AgenticRagScannerApi.Core.Runtime;
+using AgenticRagScannerApi.Core.Throttling;
 using AgenticRagScannerApi.Models;
 using AgenticRagScannerApi.Orchestration;
 using FluentAssertions;
@@ -211,6 +212,47 @@ public class ScanOrchestratorTests
     }
 
     [Fact]
+    public async Task RunAsync_WithSharedThrottle_NeverExceedsMaxConcurrentCalls_AndCompletes()
+    {
+        // Cross-layer guarantee: the orchestrator's per-group worker cap and the shared throttle's outbound
+        // call cap are independent. Four groups fan out in parallel, each firing several throttled "calls";
+        // without the throttle up to 4 * callsPerGroup calls would overlap, but the shared limiter must hold
+        // in-flight calls at MaxConcurrentCalls. It also proves the two layers do not deadlock when
+        // MaxConcurrentCalls (2) is smaller than the number of parallel groups (4).
+        const int maxConcurrentCalls = 2;
+        const int callsPerGroup = 3;
+
+        using var throttle = new RateLimitingThrottle(new RateLimitingThrottleSettings(
+            MaxConcurrentCalls: maxConcurrentCalls, RequestsPerWindow: 0, WindowSeconds: 60, QueueLimit: 256));
+
+        var current = 0;
+        var observedMax = 0;
+        var executor = new ThrottledCallExecutor(
+            throttle,
+            callsPerGroup,
+            onCallStart: () => InterlockedMax(ref observedMax, Interlocked.Increment(ref current)),
+            onCallEnd: () => Interlocked.Decrement(ref current));
+
+        var orchestrator = CreateOrchestrator(executor, maxParallel: 4);
+        var request = new ScanRequest
+        {
+            Jurisdiction = "United Kingdom",
+            TopicGroups = ["A", "B", "C", "D"],
+        };
+
+        var result = await orchestrator.RunAsync(request, CancellationToken.None);
+
+        result.Groups.Should().HaveCount(4);
+        result.Groups.Should().OnlyContain(
+            g => g.Status == "Completed",
+            "the two-layer design must not deadlock even when MaxConcurrentCalls < the number of parallel groups");
+        observedMax.Should().BeLessThanOrEqualTo(
+            maxConcurrentCalls,
+            "the shared throttle caps outbound calls across all groups regardless of group parallelism");
+        observedMax.Should().BeGreaterThan(1, "calls from parallel groups should genuinely overlap");
+    }
+
+    [Fact]
     public async Task RunAsync_SplitsCommaSeparatedGroup_IntoOneContextWithKeywordOrList()
     {
         var captured = new CapturedContexts();
@@ -278,6 +320,57 @@ public class ScanOrchestratorTests
                 });
             });
         return executor.Object;
+    }
+
+    /// <summary>
+    /// Executor that simulates a topic group making several outbound calls through the shared throttle, so a
+    /// test can assert the throttle caps in-flight calls across all parallel groups. <paramref name="onCallStart"/>
+    /// and <paramref name="onCallEnd"/> are invoked while a throttle slot is held, letting the test sample the
+    /// real concurrency the limiter permits.
+    /// </summary>
+    private sealed class ThrottledCallExecutor : ITopicGroupExecutor
+    {
+        private readonly ISharedThrottle _throttle;
+        private readonly int _callsPerGroup;
+        private readonly Action _onCallStart;
+        private readonly Action _onCallEnd;
+
+        public ThrottledCallExecutor(ISharedThrottle throttle, int callsPerGroup, Action onCallStart, Action onCallEnd)
+        {
+            _throttle = throttle;
+            _callsPerGroup = callsPerGroup;
+            _onCallStart = onCallStart;
+            _onCallEnd = onCallEnd;
+        }
+
+        public async Task<TopicGroupResult> ExecuteAsync(TopicGroupContext context, CancellationToken cancellationToken = default)
+        {
+            for (var i = 0; i < _callsPerGroup; i++)
+            {
+                await _throttle.ExecuteAsync(
+                    async ct =>
+                    {
+                        _onCallStart();
+                        try
+                        {
+                            // Hold the throttle slot briefly so concurrent calls genuinely overlap.
+                            await Task.Delay(25, ct);
+                        }
+                        finally
+                        {
+                            _onCallEnd();
+                        }
+                    },
+                    cancellationToken: cancellationToken);
+            }
+
+            return new TopicGroupResult
+            {
+                GroupId = context.TopicGroup.Id,
+                GroupName = context.TopicGroup.Name,
+                Status = "Completed",
+            };
+        }
     }
 
     /// <summary>Thread-safe capture of the contexts the executor received (groups run in parallel).</summary>
