@@ -82,7 +82,7 @@ text remains (primer §1).
 ### 1.1 — Scan orchestrator: synchronous sequential execution + controller trigger · `lane:L1-orchestration`
 **As an** auditor, **I want** a scan to start from the API **and return its results in the response**, **so that** I get an answer for each selected topic group in one call.
 **AC:**
-- `IScanOrchestrator` maps `ScanRequest` -> one `TopicGroupContext` per group (each seeded with an empty `SearchHistory`), then runs them **sequentially, one group at a time** (parallel fan-out is deferred to Epic 13).
+- `IScanOrchestrator` maps `ScanRequest` -> one `TopicGroupContext` per group (each seeded with an empty `SearchHistory`), then runs them (originally **sequentially, one group at a time**; parallel fan-out delivered in Epic 13).
 - `ScannerController.Scan` calls the orchestrator (replaces the current TODO), **runs the scan synchronously and returns the aggregated results (`200`)** — no run-status/polling for the POC.
 - Shared throttle wired for outbound LLM/Bing **rate-limiting** (0.4).
 `labels: user-story, area:maf` · **depends on:** 0.3, 0.4 · *(merged: former 1.1 + 1.5 + Epic 2's sequential loop)*
@@ -413,23 +413,28 @@ or as part of the 12.4 security review. `labels: user-story, area:security` · *
 
 ---
 
-## Epic 13 — Fan-out & parallelization (MAF) · `phase-13` · *L1-led*
+## ✅ Epic 13 — Fan-out & parallelization (MAF) · `phase-13` · *L1-led* · **Complete**
 > Deferred on purpose: get the whole pipeline running **correctly and sequentially** first, then add
 > concurrency. Replace the sequential run loop (1.1) with parallel per-topic-group execution under the
 > shared throttle once Epics 1–12 are green. *(The per-step executor decomposition this builds on
-> already landed in Epic 7.)*
+> already landed in Epic 7.)* **Done:** the sequential loop is now `Task.WhenAll` under a worker-cap gate,
+> the real `RateLimitingThrottle` replaces the no-op, and in-flight/wait-time metrics + per-group spans
+> are exported. See `docs/0.4-shared-throttle.md` for the throttle + tuning write-up.
 
-### 13.1 — Run topic-group workflows in parallel under the shared throttle · `lane:L1-orchestration`
+### 13.1 — Run topic-group workflows in parallel under the shared throttle · `lane:L1-orchestration` · **✅ Done**
 **AC:** replace the sequential loop (1.1) with `Task.WhenAll` gated by the shared throttle; active workers capped; per-group isolation preserved (one group failing does not abort the run); verified by test.
 `labels: user-story, area:maf` · **depends on:** 1.1, 0.4 · after Epics 2–10 are green · *(parallel scope; was Epic 2)*
+- `ScanOrchestrator` fans out with `Task.WhenAll` under a `SemaphoreSlim` worker gate (`Throttle:MaxParallelTopicGroups`); results are re-ordered to match the request; a group fault becomes a `Failed` result without aborting the run. Covered by `ScanOrchestratorTests` (parallel execution, request-order aggregation, failure isolation, and worker-cap enforcement).
 
-### 13.2 — In-flight concurrency traces & metrics · `lane:L3-data-platform`
+### 13.2 — In-flight concurrency traces & metrics · `lane:L3-data-platform` · **✅ Done**
 **AC:** in-flight concurrency gauge + throttle wait-time metric emitted; parallel spans visible per run/group.
 `labels: user-story, area:observability` · **depends on:** 13.1 · *(was Epic 2's concurrency metric)*
+- `ScannerDiagnostics` exposes the `scanner.topic_groups.in_flight` gauge, `scanner.topic_group.worker_wait` histogram, `scanner.topic_groups.completed` counter, and per-group `topic_group.execute` spans; wired via `AddScannerObservability` and exported to Azure Monitor when App Insights is configured.
 
-### 13.3 — Load/throttle tuning under parallel load · `lane:L1-orchestration`
+### 13.3 — Load/throttle tuning under parallel load · `lane:L1-orchestration` · **✅ Done**
 **AC:** stays within TPM/RPM/QPS with N groups in flight; backpressure verified; per-group cap tuned and documented.
 `labels: user-story, area:maf` · **depends on:** 13.1, 12.2.
+- Real `RateLimitingThrottle` (concurrency limiter + optional token-bucket RPM/QPS + backpressure queue) tunable via the `Throttle` section (`MaxConcurrentCalls`, `RequestsPerWindow`/`WindowSeconds`, `QueueLimit`); tuning guidance documented in `docs/0.4-shared-throttle.md` and covered by `RateLimitingThrottleTests`.
 
 **Epic demo:** the same pipeline that ran sequentially now runs topic groups **concurrently** under the throttle; throughput improves; the throttle caps active workers; parallel spans visible; cancellation still works.
 

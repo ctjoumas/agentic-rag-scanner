@@ -19,10 +19,17 @@
   "Foundry": {
     "Endpoint": "https://<your-foundry-endpoint>",
     "ModelDeploymentName": "<your-model-deployment-name>",
-    "ApiKey": ""
+    "ApiKey": "",
+    "Agents": {
+      "QuerySynthesis": { "ModelDeploymentName": "<optional-per-agent-deployment>" },
+      "RelevanceEval": { "ModelDeploymentName": "<optional-per-agent-deployment>" },
+      "ImpactArea": { "ModelDeploymentName": "<optional-per-agent-deployment>" },
+      "Tags": { "ModelDeploymentName": "<optional-per-agent-deployment>" },
+      "CompanyView": { "ModelDeploymentName": "<optional-per-agent-deployment>" }
+    }
   },
   "Cosmos": {
-    "Endpoint": "https://cosmoswxdev001.documents.azure.com:443/",
+    "Endpoint": "https://<your-cosmos>.documents.azure.com:443/",
     "Database": "agentic-rag-scanner",
     "CheckpointsContainer": "checkpoints",
     "RegDocsContainer": "regdocs"
@@ -32,5 +39,12 @@
     "AgentName": "<your-web-search-agent-name>",
     "MaxResults": 10,
     "RequestTimeoutSeconds": 240
+  },
+  "Throttle": {
+    "MaxParallelTopicGroups": 4,
+    "MaxConcurrentCalls": 8,
+    "RequestsPerWindow": 0,
+    "WindowSeconds": 60,
+    "QueueLimit": 256
   }
 }
