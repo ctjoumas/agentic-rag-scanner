@@ -31,7 +31,7 @@ public sealed class RunContext
     /// per-group <see cref="SearchHistory.ProcessedKeys"/>: that one is checkpoint-backed and durable
     /// within a single group, while this one lives in memory only and prevents the same URL from being
     /// fetched and evaluated twice by different groups (the dominant cost driver). Backed by a
-    /// concurrent collection so it stays correct under the parallel fan-out deferred to Epic 12.
+    /// concurrent collection so it stays correct under the parallel fan-out delivered in Epic 13.
     /// </summary>
     public ConcurrentDictionary<string, byte> SeenUrlKeys { get; } = new();
 }

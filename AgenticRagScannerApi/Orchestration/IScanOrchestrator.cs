@@ -5,7 +5,7 @@ namespace AgenticRagScannerApi.Orchestration;
 
 /// <summary>
 /// Drives the synchronous scan run lifecycle: maps a <see cref="ScanRequest"/> to per-topic-group
-/// contexts, runs them sequentially (parallel fan-out is deferred to Epic 12), and returns the
+/// contexts, runs them in parallel under the shared throttle (Epic 13 fan-out), and returns the
 /// aggregated <see cref="ScanResult"/> in a single call.
 /// </summary>
 public interface IScanOrchestrator

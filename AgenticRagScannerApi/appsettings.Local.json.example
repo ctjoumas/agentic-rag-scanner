@@ -29,7 +29,7 @@
     }
   },
   "Cosmos": {
-    "Endpoint": "https://cosmoswxdev001.documents.azure.com:443/",
+    "Endpoint": "https://<your-cosmos>.documents.azure.com:443/",
     "Database": "agentic-rag-scanner",
     "CheckpointsContainer": "checkpoints",
     "RegDocsContainer": "regdocs"
@@ -39,5 +39,12 @@
     "AgentName": "<your-web-search-agent-name>",
     "MaxResults": 10,
     "RequestTimeoutSeconds": 240
+  },
+  "Throttle": {
+    "MaxParallelTopicGroups": 4,
+    "MaxConcurrentCalls": 8,
+    "RequestsPerWindow": 0,
+    "WindowSeconds": 60,
+    "QueueLimit": 256
   }
 }

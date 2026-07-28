@@ -1,5 +1,6 @@
 using AgenticRagScannerApi.Configuration;
 using AgenticRagScannerApi.Core.Throttling;
+using AgenticRagScannerApi.Diagnostics;
 using AgenticRagScannerApi.Filters;
 using AgenticRagScannerApi.Mappers;
 using AgenticRagScannerApi.Orchestration;
@@ -27,7 +28,12 @@ using FluentValidation;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
+using Azure.Monitor.OpenTelemetry.Exporter;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Polly;
+using Polly.CircuitBreaker;
 using Polly.Retry;
 using SharpGrip.FluentValidation.AutoValidation.Mvc.Extensions;
 using System.ClientModel;
@@ -65,6 +71,57 @@ public static class ServiceCollectionExtensions
         services.AddOptions<WebSearchOptions>().Bind(configuration.GetSection(WebSearchOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<FetchOptions>().Bind(configuration.GetSection(FetchOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<RegulatoryUpdatesCsvOptions>().Bind(configuration.GetSection(RegulatoryUpdatesCsvOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<ThrottleOptions>().Bind(configuration.GetSection(ThrottleOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Wires OpenTelemetry traces + metrics for the scan orchestrator's parallel fan-out (Epic 13, story
+    /// 13.2): the custom <see cref="ScannerDiagnostics"/> source/meter (in-flight concurrency gauge,
+    /// worker-gate wait histogram, group-outcome counter, per-group spans), the Microsoft.Extensions.AI
+    /// GenAI instrumentation (token/latency), and ASP.NET Core request telemetry. Exports to Azure Monitor
+    /// when an Application Insights connection string is configured (the same resource Serilog logs to).
+    /// When no connection string is set (typical local dev) the instruments are still collected but not
+    /// exported anywhere - deliberately no console exporter, which would flood the terminal and bury the
+    /// Serilog logs. Logs stay on the existing Serilog -> App Insights sink, so OpenTelemetry here carries
+    /// only traces + metrics and does not double-emit logs.
+    /// </summary>
+    public static IServiceCollection AddScannerObservability(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        // Microsoft.Extensions.AI's UseOpenTelemetry() emits under this source/meter name.
+        const string genAiSourceName = "Experimental.Microsoft.Extensions.AI";
+        var appInsightsConnectionString = configuration["ApplicationInsights:ConnectionString"];
+        var exportToAzureMonitor = !string.IsNullOrWhiteSpace(appInsightsConnectionString);
+
+        services.AddOpenTelemetry()
+            .ConfigureResource(resource => resource.AddService("AgenticRagScannerApi"))
+            .WithTracing(tracing =>
+            {
+                tracing
+                    .AddSource(ScannerDiagnostics.ActivitySourceName)
+                    .AddSource(genAiSourceName)
+                    .AddAspNetCoreInstrumentation();
+
+                if (exportToAzureMonitor)
+                {
+                    tracing.AddAzureMonitorTraceExporter(o => o.ConnectionString = appInsightsConnectionString);
+                }
+            })
+            .WithMetrics(metrics =>
+            {
+                metrics
+                    .AddMeter(ScannerDiagnostics.MeterName)
+                    .AddMeter(genAiSourceName)
+                    .AddAspNetCoreInstrumentation();
+
+                if (exportToAzureMonitor)
+                {
+                    metrics.AddAzureMonitorMetricExporter(o => o.ConnectionString = appInsightsConnectionString);
+                }
+            });
 
         return services;
     }
@@ -126,8 +183,13 @@ public static class ServiceCollectionExtensions
         // once and cached.
         services.AddSingleton<IPriorCompanyViewSource, CsvPriorCompanyViewSource>();
 
-        // Shared throttle - Phase 0 pass-through; real TPM/RPM/QPS limits arrive later.
-        services.AddSingleton<ISharedThrottle, NoOpThrottle>();
+        // Shared throttle - the real RateLimitingThrottle gates outbound Azure OpenAI / Bing calls
+        // (concurrency cap + token-bucket RPM/QPS) so N parallel topic groups (Epic 13) never exceed shared
+        // service limits. Built once from the validated ThrottleOptions.
+        services.AddSingleton<ISharedThrottle>(sp =>
+            new RateLimitingThrottle(
+                sp.GetRequiredService<IOptions<ThrottleOptions>>().Value.ToThrottleSettings(),
+                sp.GetRequiredService<ILogger<RateLimitingThrottle>>()));
 
         // Keyless auth - inject this TokenCredential into Azure SDK clients (keys are local-dev only).
         services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
@@ -300,9 +362,10 @@ public static class ServiceCollectionExtensions
                 agent = projectClient.AsAIAgent(version);
             }
 
-            // Retry transient Bing-grounding failures with exponential backoff + jitter and a per-attempt
-            // timeout, mirroring ResilientChatClient. A single agent error still degrades gracefully:
-            // once retries are exhausted the agent logs and returns no hits rather than aborting the run.
+            // Retry transient Bing-grounding failures with exponential backoff + jitter (honoring a server
+            // Retry-After hint), a circuit breaker that fails fast when the agent is repeatedly overloaded,
+            // and a per-attempt timeout, mirroring ResilientChatClient. A single agent error still degrades
+            // gracefully: once retries are exhausted the agent logs and returns no hits rather than aborting.
             var resilience = new ResiliencePipelineBuilder()
                 .AddRetry(new RetryStrategyOptions
                 {
@@ -310,7 +373,18 @@ public static class ServiceCollectionExtensions
                     BackoffType = DelayBackoffType.Exponential,
                     UseJitter = true,
                     Delay = TimeSpan.FromSeconds(options.RetryBaseDelaySeconds),
-                    ShouldHandle = static args => ValueTask.FromResult(IsTransientWebSearchFailure(args.Outcome.Exception)),
+                    ShouldHandle = static args => ValueTask.FromResult(ResilienceHelpers.IsTransient(args.Outcome.Exception)),
+                    DelayGenerator = options.RespectRetryAfter
+                        ? args => ValueTask.FromResult(ResilienceHelpers.TryGetRetryAfter(args.Outcome.Exception))
+                        : null,
+                })
+                .AddCircuitBreaker(new CircuitBreakerStrategyOptions
+                {
+                    FailureRatio = options.CircuitBreakerFailureRatio,
+                    SamplingDuration = TimeSpan.FromSeconds(options.CircuitBreakerSamplingSeconds),
+                    MinimumThroughput = options.CircuitBreakerMinimumThroughput,
+                    BreakDuration = TimeSpan.FromSeconds(options.CircuitBreakerBreakSeconds),
+                    ShouldHandle = static args => ValueTask.FromResult(ResilienceHelpers.ShouldBreak(args.Outcome.Exception)),
                 })
                 .AddTimeout(TimeSpan.FromSeconds(options.RequestTimeoutSeconds + 30))
                 .Build();
@@ -328,27 +402,6 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
-
-    /// <summary>
-    /// Classifies an exception thrown by the hosted Web Search agent as transient (worth retrying):
-    /// connection drops (status 0), request timeouts (408), throttling (429), and server-side (5xx)
-    /// failures.
-    /// <para>
-    /// HTTP 408 is treated as transient (like <see cref="ResilientChatClient"/>). For a Bing-grounded
-    /// agent a 408 means the run did not finish in time, which is often intermittent (Bing latency
-    /// spikes, cold routing) rather than a permanent failure. The resilience pipeline retries with
-    /// exponential backoff + jitter and a per-attempt timeout, giving the search a reasonable window to
-    /// complete before the group is surfaced as Failed.
-    /// </para>
-    /// </summary>
-    private static bool IsTransientWebSearchFailure(Exception? exception) => exception switch
-    {
-        ClientResultException clientResult => clientResult.Status is 0 or 408 or 429 or >= 500,
-        RequestFailedException requestFailed => requestFailed.Status is 0 or 408 or 429 or >= 500,
-        HttpRequestException => true,
-        TimeoutException => true,
-        _ => false,
-    };
 
     public static IServiceCollection AddValidationServices(this IServiceCollection services)
     {
