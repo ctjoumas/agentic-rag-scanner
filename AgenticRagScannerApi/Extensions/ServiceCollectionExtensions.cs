@@ -384,7 +384,7 @@ public static class ServiceCollectionExtensions
                     SamplingDuration = TimeSpan.FromSeconds(options.CircuitBreakerSamplingSeconds),
                     MinimumThroughput = options.CircuitBreakerMinimumThroughput,
                     BreakDuration = TimeSpan.FromSeconds(options.CircuitBreakerBreakSeconds),
-                    ShouldHandle = static args => ValueTask.FromResult(ResilienceHelpers.IsTransient(args.Outcome.Exception)),
+                    ShouldHandle = static args => ValueTask.FromResult(ResilienceHelpers.ShouldBreak(args.Outcome.Exception)),
                 })
                 .AddTimeout(TimeSpan.FromSeconds(options.RequestTimeoutSeconds + 30))
                 .Build();

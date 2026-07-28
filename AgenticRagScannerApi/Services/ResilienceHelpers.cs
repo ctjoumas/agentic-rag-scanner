@@ -31,6 +31,16 @@ internal static class ResilienceHelpers
     };
 
     /// <summary>
+    /// Failures the circuit breaker should count toward tripping: the same transient surface as
+    /// <see cref="IsTransient"/>, but excluding <see cref="ThrottleRejectedException"/>. A throttle
+    /// rejection is our own backpressure (load shedding), not an unhealthy endpoint - it is still retried
+    /// (see <see cref="IsTransient"/>), but must not open the breaker, or a demand spike against a healthy
+    /// service would fail-fast every call for the break duration.
+    /// </summary>
+    public static bool ShouldBreak(Exception? exception) =>
+        IsTransient(exception) && exception is not ThrottleRejectedException;
+
+    /// <summary>
     /// Reads the <c>Retry-After</c> header from a failed response, supporting both the delta-seconds form
     /// ("Retry-After: 12") and the HTTP-date form ("Retry-After: Wed, 21 Oct 2026 07:28:00 GMT"). Returns
     /// <see langword="null"/> when the header is absent, unparseable, or non-positive.
