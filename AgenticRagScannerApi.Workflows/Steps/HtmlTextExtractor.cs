@@ -116,14 +116,14 @@ internal static partial class HtmlTextExtractor
 
         foreach (var meta in document.DocumentNode.SelectNodes("//meta") ?? Enumerable.Empty<HtmlNode>())
         {
-            var content = meta.GetAttributeValue("content", null);
-            var label = meta.GetAttributeValue("name", null) ?? meta.GetAttributeValue("property", null);
+            var content = meta.GetAttributeValue<string?>("content", null);
+            var label = meta.GetAttributeValue<string?>("name", null) ?? meta.GetAttributeValue<string?>("property", null);
             Consider(label, content);
         }
 
         foreach (var time in document.DocumentNode.SelectNodes("//time") ?? Enumerable.Empty<HtmlNode>())
         {
-            var datetime = time.GetAttributeValue("datetime", null);
+            var datetime = time.GetAttributeValue<string?>("datetime", null);
             Consider("date", string.IsNullOrWhiteSpace(datetime) ? time.InnerText : datetime);
         }
 
