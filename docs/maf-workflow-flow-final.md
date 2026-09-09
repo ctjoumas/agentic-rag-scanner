@@ -8,12 +8,12 @@ flowchart TD
 
     subgraph PIPELINE["MAF Executor Graph (one executor per super-step)"]
         direction TB
-        QS["1 - QuerySynthesisExecutor<br/>create one query from keywords and history<br/>start and record the pass"]
-        WS["2 - WebSearchExecutor<br/>run a versioned Foundry agent definition<br/>through MAF AIAgent<br/>map Bing-grounded URL citations to hits"]
-        PF["3 - PreFilterExecutor<br/>canonicalize and validate URLs<br/>de-duplicate within and across groups<br/>record retained hits"]
-        FC["4 - FetchAndCleanExecutor<br/>fetch and clean each document<br/>mark snippet fallback as unverified"]
-        RE["5 - RelevanceEvalExecutor<br/>if documents exist, evaluate them in one call<br/>return item verdicts and a loop decision"]
-        LC["6 - LoopControllerExecutor<br/>apply loop cap and recall override<br/>discard confidently out-of-window items<br/>record review and snapshot available vetted text"]
+        QS["1 - QuerySynthesisExecutor<br/>Create one query from keywords and history.<br/>Start and record the pass"]
+        WS["2 - WebSearchExecutor<br/>Run a versioned Foundry agent definition<br/>through MAF AIAgent.<br/>Map Bing-grounded URL citations to hits"]
+        PF["3 - PreFilterExecutor<br/>Canonicalize and validate URLs.<br/>De-duplicate within and across groups.<br/>Record retained hits"]
+        FC["4 - FetchAndCleanExecutor<br/>Fetch and clean each document.<br/>Mark snippet fallback as unverified"]
+        RE["5 - RelevanceEvalExecutor<br/>If documents exist, evaluate them in one call.<br/>Return item verdicts and a loop decision"]
+        LC["6 - LoopControllerExecutor<br/>Apply loop cap and recall override.<br/>Discard confidently out-of-window items.<br/>Record review and snapshot available vetted text"]
 
         QS -->|QueryResult| WS
         WS -->|HitsResult| PF
